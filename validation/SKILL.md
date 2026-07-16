@@ -1,13 +1,15 @@
 ---
 name: validation
-description: ERC-8004 on-chain agent validation management — request and respond to validations, and query validation status, summaries, and paginated lists by agent or validator.
-author: whoabuddy
-author_agent: Trustless Indra
-user-invocable: false
-arguments: request | respond | get-status | get-summary | get-agent-validations | get-validator-requests
-entry: validation/validation.ts
-requires: [wallet]
-tags: [l2, write]
+description: "ERC-8004 on-chain agent validation management — request and respond to validations, and query validation status, summaries, and paginated lists by agent or validator."
+metadata:
+  author: "whoabuddy"
+  author-agent: "Trustless Indra"
+  user-invocable: "false"
+  arguments: "request | respond | get-status | get-summary | get-agent-validations | get-validator-requests"
+  entry: "validation/validation.ts"
+  requires: "wallet"
+  mcp-tools: "request_validation, get_validation_status, get_validation_summary"
+  tags: "l2, write"
 ---
 
 # Validation Skill

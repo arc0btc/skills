@@ -9,6 +9,7 @@
 
 import * as btc from "@scure/btc-signer";
 import { p2tr_ord_reveal } from "micro-ordinals";
+import type { Tags } from "micro-ordinals";
 import type { Network } from "../config/networks.js";
 import {
   P2WPKH_INPUT_VBYTES,
@@ -62,6 +63,12 @@ export interface BuildCommitTransactionOptions {
    * Network (mainnet or testnet)
    */
   network: Network;
+  /**
+   * Optional parent inscription ID for child inscription binding (format: {txid}i{index}).
+   * When set, the inscription is encoded as a child of the specified parent per the
+   * Ordinals protocol specification (parent tag in the inscription envelope).
+   */
+  parentInscriptionId?: string;
 }
 
 /**
@@ -182,7 +189,7 @@ function getBtcNetwork(network: Network): typeof btc.NETWORK {
 export function buildCommitTransaction(
   options: BuildCommitTransactionOptions
 ): BuildCommitTransactionResult {
-  const { utxos, inscription, feeRate, senderPubKey, senderAddress, network } =
+  const { utxos, inscription, feeRate, senderPubKey, senderAddress, network, parentInscriptionId } =
     options;
 
   // Validate inputs
@@ -214,8 +221,20 @@ export function buildCommitTransaction(
   // Create inscription reveal script using micro-ordinals
   // p2tr_ord_reveal returns { type: 'tr', script: Uint8Array }
   const btcNetwork = getBtcNetwork(network);
+
+  // Build inscription tags — include parent tag for child inscription binding if provided.
+  // Tags.parent is typed as P.Coder<string, Uint8Array> due to a micro-ordinals type
+  // inconsistency (UnwrapCoder doesn't unwrap plain Coder<A,B>), but at runtime the field
+  // holds the decoded string value. We cast through unknown to satisfy the type checker.
+  const tags: Tags = {
+    contentType: inscription.contentType,
+    ...(parentInscriptionId
+      ? { parent: parentInscriptionId as unknown as Tags["parent"] }
+      : {}),
+  };
+
   const inscriptionData = {
-    tags: { contentType: inscription.contentType },
+    tags,
     body: inscription.body,
   };
 
@@ -227,7 +246,8 @@ export function buildCommitTransaction(
 
   // Create P2TR output from the reveal script
   // For script path spending, we use the internal pubkey and the script tree
-  const p2trReveal = btc.p2tr(xOnlyPubkey, revealScriptData, btcNetwork);
+  // 4th arg `true` required for micro-ordinals unknown leaf scripts
+  const p2trReveal = btc.p2tr(xOnlyPubkey, revealScriptData, btcNetwork, true);
 
   if (!p2trReveal.address) {
     throw new Error("Failed to generate reveal address");
@@ -389,9 +409,14 @@ export function buildRevealTransaction(
   // Estimate reveal transaction size
   // 1 input (Taproot with inscription witness) + 1 output (recipient)
   const revealInputSize = P2TR_INPUT_BASE_VBYTES;
+  // Use the tap leaf script (which contains the inscription body) for witness size,
+  // not the P2TR output script (which is tiny). tapLeafScript is an array of
+  // [controlBlock, leafScript] tuples; we use the leafScript from the first entry.
+  const WITNESS_OVERHEAD_VBYTES = 80; // Control block + script + protocol framing
+  const leafScriptSize = revealScript.tapLeafScript?.[0]?.[1]?.length || 0;
   const revealWitnessSize = Math.ceil(
-    (revealScript.script?.byteLength || 0) / 4
-  );
+    ((leafScriptSize || revealScript.script?.byteLength || 0) / 4) * 1.25
+  ) + WITNESS_OVERHEAD_VBYTES;
   const revealTxSize =
     TX_OVERHEAD_VBYTES + revealInputSize + revealWitnessSize + P2TR_OUTPUT_VBYTES;
   const revealFee = Math.ceil(revealTxSize * feeRate);
@@ -407,7 +432,7 @@ export function buildRevealTransaction(
 
   // Build the reveal transaction
   const btcNetwork = getBtcNetwork(network);
-  const tx = new btc.Transaction();
+  const tx = new btc.Transaction({ allowUnknownOutputs: true, allowUnknownInputs: true });
 
   // Add input spending from commit transaction
   // For Taproot script path spending, we need to provide the witness data
@@ -419,7 +444,7 @@ export function buildRevealTransaction(
       amount: BigInt(commitAmount),
     },
     // Include taproot script path info for script-path spending
-    ...revealScript.tapLeafScript,
+    tapLeafScript: revealScript.tapLeafScript,
   });
 
   // Add output to recipient (Taproot address)

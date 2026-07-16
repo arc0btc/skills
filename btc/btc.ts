@@ -15,7 +15,7 @@ import {
   getMempoolTxUrl,
   type UTXO,
 } from "../src/lib/services/mempool-api.js";
-import { OrdinalIndexer } from "../src/lib/services/ordinal-indexer.js";
+import { UnisatIndexer } from "../src/lib/services/unisat-indexer.js";
 import { buildAndSignBtcTransaction } from "../src/lib/transactions/bitcoin-builder.js";
 import { printJson, handleError } from "../src/lib/utils/cli.js";
 
@@ -302,19 +302,12 @@ program
 
         // Fetch UTXOs — cardinal only by default for safety
         let utxos: UTXO[];
-        let testnetWarning = "";
 
         if (opts.includeOrdinals) {
           utxos = await api.getUtxos(account.btcAddress);
         } else {
-          if (NETWORK === "testnet") {
-            utxos = await api.getUtxos(account.btcAddress);
-            testnetWarning =
-              "Note: Ordinal protection is not available on testnet. All UTXOs were used.";
-          } else {
-            const indexer = new OrdinalIndexer(NETWORK);
-            utxos = await indexer.getCardinalUtxos(account.btcAddress);
-          }
+          const indexer = new UnisatIndexer(NETWORK);
+          utxos = await indexer.getCardinalUtxos(account.btcAddress);
         }
 
         if (utxos.length === 0) {
@@ -366,7 +359,7 @@ program
 
         const txid = await api.broadcastTransaction(txResult.txHex);
 
-        const response: Record<string, unknown> = {
+        printJson({
           success: true,
           txid,
           explorerUrl: getMempoolTxUrl(txid, NETWORK),
@@ -390,13 +383,7 @@ program
           },
           sender: account.btcAddress,
           network: NETWORK,
-        };
-
-        if (testnetWarning) {
-          response.warning = testnetWarning;
-        }
-
-        printJson(response);
+        });
       } catch (error) {
         handleError(error);
       }
@@ -410,9 +397,8 @@ program
 program
   .command("get-cardinal-utxos")
   .description(
-    "Get cardinal UTXOs (safe to spend — no inscriptions). " +
-      "Cardinal UTXOs do not contain ordinal inscriptions and can be safely spent. " +
-      "Only available on mainnet (Hiro Ordinals API does not index testnet)."
+    "Get cardinal UTXOs (safe to spend — no inscriptions or runes). " +
+      "Cardinal UTXOs do not contain ordinal inscriptions or rune balances and can be safely spent."
   )
   .option(
     "--address <address>",
@@ -426,28 +412,21 @@ program
   .action(async (opts: { address?: string; confirmedOnly: boolean }) => {
     try {
       const btcAddress = await getBtcAddress(opts.address);
-      const indexer = new OrdinalIndexer(NETWORK);
+      const indexer = new UnisatIndexer(NETWORK);
       let utxos = await indexer.getCardinalUtxos(btcAddress);
 
       if (opts.confirmedOnly) {
         utxos = utxos.filter((u) => u.status.confirmed);
       }
 
-      const response: Record<string, unknown> = {
+      printJson({
         address: btcAddress,
         network: NETWORK,
         type: "cardinal",
         utxos: utxos.map(formatUtxo),
         summary: summarizeUtxos(utxos),
         explorerUrl: getMempoolAddressUrl(btcAddress, NETWORK),
-      };
-
-      if (NETWORK === "testnet") {
-        response.warning =
-          "Ordinal indexing not available on testnet. All UTXOs shown as cardinal.";
-      }
-
-      printJson(response);
+      });
     } catch (error) {
       handleError(error);
     }
@@ -460,9 +439,8 @@ program
 program
   .command("get-ordinal-utxos")
   .description(
-    "Get ordinal UTXOs (contain inscriptions — do not spend). " +
-      "These UTXOs carry ordinal data and should not be used in regular transfers. " +
-      "Only available on mainnet (Hiro Ordinals API does not index testnet)."
+    "Get ordinal UTXOs (contain inscriptions — do not spend in regular transfers). " +
+      "These UTXOs carry ordinal inscriptions. Use the ordinals skill to transfer them safely."
   )
   .option(
     "--address <address>",
@@ -476,28 +454,63 @@ program
   .action(async (opts: { address?: string; confirmedOnly: boolean }) => {
     try {
       const btcAddress = await getBtcAddress(opts.address);
-      const indexer = new OrdinalIndexer(NETWORK);
-      let utxos = await indexer.getOrdinalUtxos(btcAddress);
+      const indexer = new UnisatIndexer(NETWORK);
+      let utxos = await indexer.getInscriptionUtxos(btcAddress);
 
       if (opts.confirmedOnly) {
         utxos = utxos.filter((u) => u.status.confirmed);
       }
 
-      const response: Record<string, unknown> = {
+      printJson({
         address: btcAddress,
         network: NETWORK,
         type: "ordinal",
         utxos: utxos.map(formatUtxo),
         summary: summarizeUtxos(utxos),
         explorerUrl: getMempoolAddressUrl(btcAddress, NETWORK),
-      };
+      });
+    } catch (error) {
+      handleError(error);
+    }
+  });
 
-      if (NETWORK === "testnet") {
-        response.warning =
-          "Ordinal indexing not available on testnet. No inscriptions can be detected.";
+// ---------------------------------------------------------------------------
+// get-rune-utxos
+// ---------------------------------------------------------------------------
+
+program
+  .command("get-rune-utxos")
+  .description(
+    "Get rune UTXOs (contain rune balances — do not spend in regular transfers). " +
+      "These UTXOs carry rune tokens. Use the runes skill to transfer them safely."
+  )
+  .option(
+    "--address <address>",
+    "Bitcoin address to check (uses active wallet if omitted)"
+  )
+  .option(
+    "--confirmed-only",
+    "Only return confirmed UTXOs",
+    false
+  )
+  .action(async (opts: { address?: string; confirmedOnly: boolean }) => {
+    try {
+      const btcAddress = await getBtcAddress(opts.address);
+      const indexer = new UnisatIndexer(NETWORK);
+      let utxos = await indexer.getRuneClassifiedUtxos(btcAddress);
+
+      if (opts.confirmedOnly) {
+        utxos = utxos.filter((u) => u.status.confirmed);
       }
 
-      printJson(response);
+      printJson({
+        address: btcAddress,
+        network: NETWORK,
+        type: "rune",
+        utxos: utxos.map(formatUtxo),
+        summary: summarizeUtxos(utxos),
+        explorerUrl: getMempoolAddressUrl(btcAddress, NETWORK),
+      });
     } catch (error) {
       handleError(error);
     }
@@ -511,8 +524,7 @@ program
   .command("get-inscriptions")
   .description(
     "Get all inscriptions owned by a Bitcoin address. " +
-      "Returns inscription IDs, content types, and metadata. " +
-      "Only available on mainnet (Hiro Ordinals API does not index testnet)."
+      "Returns inscription IDs, content types, and metadata via Unisat API."
   )
   .option(
     "--address <address>",
@@ -521,22 +533,21 @@ program
   .action(async (opts: { address?: string }) => {
     try {
       const btcAddress = await getBtcAddress(opts.address);
-      const indexer = new OrdinalIndexer(NETWORK);
+      const indexer = new UnisatIndexer(NETWORK);
       const inscriptions = await indexer.getInscriptionsForAddress(btcAddress);
 
       const formattedInscriptions = inscriptions.map((ins) => ({
-        id: ins.id,
-        number: ins.number,
-        contentType: ins.content_type,
-        contentLength: ins.content_length,
+        id: ins.inscriptionId,
+        number: ins.inscriptionNumber,
+        contentType: ins.contentType,
+        contentLength: ins.contentLength,
         output: ins.output,
         location: ins.location,
         offset: ins.offset,
+        outputValue: ins.outputValue,
         genesis: {
-          txid: ins.genesis_tx_id,
-          blockHeight: ins.genesis_block_height,
-          blockHash: ins.genesis_block_hash,
-          timestamp: new Date(ins.genesis_timestamp).toISOString(),
+          txid: ins.genesisTransaction,
+          timestamp: new Date(ins.timestamp * 1000).toISOString(),
         },
       }));
 
@@ -547,7 +558,7 @@ program
         summary: {
           count: inscriptions.length,
           contentTypes: [
-            ...new Set(inscriptions.map((i) => i.content_type)),
+            ...new Set(inscriptions.map((i) => i.contentType)),
           ].sort(),
         },
         explorerUrl: getMempoolAddressUrl(btcAddress, NETWORK),

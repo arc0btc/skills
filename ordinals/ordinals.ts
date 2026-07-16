@@ -25,6 +25,11 @@ import {
   type InscriptionData,
 } from "../src/lib/transactions/inscription-builder.js";
 import { signBtcTransaction } from "../src/lib/transactions/bitcoin-builder.js";
+import {
+  buildInscriptionTransfer,
+  signInscriptionTransfer,
+} from "../src/lib/transactions/inscription-transfer-builder.js";
+import { UnisatIndexer } from "../src/lib/services/unisat-indexer.js";
 import { printJson, handleError } from "../src/lib/utils/cli.js";
 
 // ---------------------------------------------------------------------------
@@ -529,6 +534,144 @@ program
       handleError(error);
     }
   });
+
+// ---------------------------------------------------------------------------
+// transfer-inscription
+// ---------------------------------------------------------------------------
+
+program
+  .command("transfer-inscription")
+  .description(
+    "Transfer an inscription to a new owner. " +
+      "Looks up the inscription UTXO via Unisat, uses cardinal UTXOs for fees, " +
+      "and sends the inscription to the recipient's Taproot address."
+  )
+  .requiredOption(
+    "--inscription-id <id>",
+    "Inscription ID (e.g., abc123...i0)"
+  )
+  .requiredOption(
+    "--recipient <address>",
+    "Recipient Taproot address (bc1p... or tb1p...)"
+  )
+  .option(
+    "--fee-rate <rate>",
+    "Fee rate: fast | medium | slow | number in sat/vB (default: medium)"
+  )
+  .action(
+    async (opts: {
+      inscriptionId: string;
+      recipient: string;
+      feeRate?: string;
+    }) => {
+      try {
+        const walletManager = getWalletManager();
+        const account = walletManager.getActiveAccount();
+
+        if (!account) {
+          throw new Error(
+            "Wallet is not unlocked. Use wallet/wallet.ts unlock first."
+          );
+        }
+
+        if (
+          !account.btcAddress ||
+          !account.btcPrivateKey ||
+          !account.btcPublicKey ||
+          !account.taprootPrivateKey ||
+          !account.taprootPublicKey ||
+          !account.taprootAddress
+        ) {
+          throw new Error(
+            "Bitcoin and Taproot keys not available. Please unlock your wallet again."
+          );
+        }
+
+        // Look up the inscription to find its UTXO
+        const indexer = new UnisatIndexer(NETWORK);
+        const inscriptions = await indexer.getInscriptionsForAddress(
+          account.taprootAddress
+        );
+
+        const inscription = inscriptions.find(
+          (ins) => ins.inscriptionId === opts.inscriptionId
+        );
+
+        if (!inscription) {
+          throw new Error(
+            `Inscription ${opts.inscriptionId} not found at address ${account.taprootAddress}. ` +
+              `Ensure the inscription is owned by this wallet's Taproot address.`
+          );
+        }
+
+        // Parse the output reference to get txid:vout
+        const [txid, voutStr] = inscription.output.split(":");
+        const vout = parseInt(voutStr, 10);
+
+        const inscriptionUtxo = {
+          txid,
+          vout,
+          value: inscription.outputValue,
+          status: { confirmed: true, block_height: 0, block_hash: "", block_time: 0 },
+        };
+
+        // Get cardinal UTXOs for fees (from SegWit address)
+        const cardinalUtxos = await indexer.getCardinalUtxos(account.btcAddress);
+        if (cardinalUtxos.length === 0) {
+          throw new Error(
+            `No cardinal UTXOs available at ${account.btcAddress} to pay fees. ` +
+              `Send some BTC to your SegWit address first.`
+          );
+        }
+
+        const mempoolApi = new MempoolApi(NETWORK);
+        const actualFeeRate = await resolveFeeRate(opts.feeRate, mempoolApi);
+
+        const transferResult = buildInscriptionTransfer({
+          inscriptionUtxo,
+          feeUtxos: cardinalUtxos,
+          recipientAddress: opts.recipient,
+          feeRate: actualFeeRate,
+          senderPubKey: account.btcPublicKey,
+          senderTaprootPubKey: account.taprootPublicKey,
+          senderAddress: account.btcAddress,
+          network: NETWORK,
+        });
+
+        const signed = signInscriptionTransfer(
+          transferResult.tx,
+          account.taprootPrivateKey,
+          account.btcPrivateKey,
+          transferResult.inscriptionInputIndex,
+          transferResult.feeInputIndices
+        );
+
+        const txidResult = await mempoolApi.broadcastTransaction(signed.txHex);
+
+        printJson({
+          success: true,
+          txid: txidResult,
+          explorerUrl: getMempoolTxUrl(txidResult, NETWORK),
+          inscription: {
+            id: opts.inscriptionId,
+            contentType: inscription.contentType,
+            output: inscription.output,
+          },
+          recipient: opts.recipient,
+          fee: {
+            satoshis: transferResult.fee,
+            rateUsed: `${actualFeeRate} sat/vB`,
+          },
+          change: {
+            satoshis: transferResult.change,
+          },
+          network: NETWORK,
+        });
+      } catch (error) {
+        handleError(error);
+      }
+    }
+  );
 
 // ---------------------------------------------------------------------------
 // Parse

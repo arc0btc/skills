@@ -315,16 +315,14 @@ program
       const identifier = toIdentifier(options.name);
 
       if (data.deals.find((d) => d.identifier === identifier)) {
-        printJson({
-          error: `Prospect '${options.name}' already in pipeline`,
-        });
-        process.exit(1);
+        handleError(new Error(`Prospect '${options.name}' already in pipeline`));
+        return;
       }
 
       const value = parseInt(options.value);
       if (isNaN(value) || value < 0) {
-        printJson({ error: "Value must be a non-negative number" });
-        process.exit(1);
+        handleError(new Error("Value must be a non-negative number"));
+        return;
       }
 
       const deal: Deal = {
@@ -378,8 +376,8 @@ program
       const deal = data.deals.find((d) => d.identifier === identifier);
 
       if (!deal) {
-        printJson({ error: `Prospect '${options.name}' not found` });
-        process.exit(1);
+        handleError(new Error(`Prospect '${options.name}' not found`));
+        return;
       }
 
       deal.bant = {
@@ -443,8 +441,8 @@ program
 
       const revenue = parseInt(options.revenue);
       if (isNaN(revenue) || revenue <= 0) {
-        printJson({ error: "Revenue must be a positive number" });
-        process.exit(1);
+        handleError(new Error("Revenue must be a positive number"));
+        return;
       }
 
       const closedDeal: Deal = dealIdx >= 0
@@ -712,11 +710,8 @@ program
     try {
       const tmpl = TEMPLATES[options.type];
       if (!tmpl) {
-        printJson({
-          error: `Unknown template type: ${options.type}`,
-          available: Object.keys(TEMPLATES),
-        });
-        process.exit(1);
+        handleError(new Error(`Unknown template type: ${options.type}. Available: ${Object.keys(TEMPLATES).join(", ")}`));
+        return;
       }
 
       printJson({
@@ -731,4 +726,4 @@ program
     }
   });
 
-program.parse();
+program.parse(process.argv);

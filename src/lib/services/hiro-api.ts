@@ -28,6 +28,15 @@ export interface AccountInfo {
   nonceProof: string;
 }
 
+/** Extended nonce info from /extended/v1/address/{addr}/nonces */
+export interface NonceInfo {
+  last_mempool_tx_nonce: number | null;
+  last_executed_tx_nonce: number;
+  possible_next_nonce: number;
+  detected_missing_nonces: number[];
+  detected_mempool_nonces: number[];
+}
+
 export interface StxBalance {
   balance: string;
   total_sent: string;
@@ -413,6 +422,15 @@ export class HiroApiService {
     return info.nonce;
   }
 
+  /**
+   * Get extended nonce info including mempool and missing nonce detection.
+   * Uses the /extended/v1/address/{addr}/nonces endpoint which accounts for
+   * mempool transactions and detects nonce gaps.
+   */
+  async getNonceInfo(address: string): Promise<NonceInfo> {
+    return this.fetch<NonceInfo>(`/extended/v1/address/${address}/nonces`);
+  }
+
   // ==========================================================================
   // Token Operations
   // ==========================================================================
@@ -431,8 +449,11 @@ export class HiroApiService {
   async getTokenMetadata(contractId: string): Promise<TokenMetadata | null> {
     try {
       return await this.fetch<TokenMetadata>(`/metadata/v1/ft/${contractId}`);
-    } catch {
-      return null;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("404")) {
+        return null;
+      }
+      throw error;
     }
   }
 
@@ -691,8 +712,11 @@ export class HiroApiService {
     try {
       const info = await this.getBnsNameInfo(name);
       return info.address;
-    } catch {
-      return null;
+    } catch (error) {
+      if (error instanceof Error && (error.message.includes("404") || error.message.includes("not found"))) {
+        return null;
+      }
+      throw error;
     }
   }
 
@@ -839,8 +863,11 @@ export class BnsV2ApiService {
         return info.data.owner;
       }
       return null;
-    } catch {
-      return null;
+    } catch (error) {
+      if (error instanceof Error && (error.message.includes("404") || error.message.includes("Name not found"))) {
+        return null;
+      }
+      throw error;
     }
   }
 }

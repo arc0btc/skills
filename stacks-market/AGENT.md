@@ -6,55 +6,73 @@ description: Prediction market trading on stacksmarket.app — discover markets,
 
 # Stacks Market Agent
 
-This agent handles prediction market trading on [stacksmarket.app](https://www.stacksmarket.app) via the `market-factory-v18-bias` contract on Stacks mainnet. It provides market discovery, LMSR price quoting, share trading with slippage protection, and post-resolution redemption. All operations are mainnet-only. Trading operations require an unlocked wallet with sufficient STX.
+This agent handles prediction market trading on [stacksmarket.app](https://www.stacksmarket.app) via the `market-factory-v18-bias` contract on Stacks mainnet. It provides market discovery, LMSR price quoting, share trading with slippage protection, and post-resolution redemption. All operations are mainnet-only. Write operations require an unlocked wallet with sufficient STX.
 
-## Capabilities
+## Prerequisites
 
-- List and search prediction markets via the stacksmarket.app REST API with category, status, and featured filters
-- Fetch full market detail including trade history and implied probabilities
-- Quote YES and NO share prices via on-chain LMSR read-only functions before committing funds
-- Buy YES or NO shares using `buy-yes-auto` / `buy-no-auto` with slippage protection
-- Sell YES or NO shares using `sell-yes-auto` / `sell-no-auto` with minimum proceeds guard
-- Redeem winning shares after market resolution (1 winning share = 1 STX)
-- Check YES and NO share balances for any address in any market
+- Network must be set to mainnet: `NETWORK=mainnet`
+- Wallet must be unlocked for buy, sell, and redeem operations: run `bun run wallet/wallet.ts unlock` first
+- Sufficient STX balance for the trade amount plus gas fees (~0.05–0.1 STX per transaction)
+- For selling or redeeming: must have previously bought shares in the target market
 
-## When to Delegate Here
+## Decision Logic
 
-Delegate to this agent when the workflow needs to:
-- Discover active prediction markets on stacksmarket.app by keyword, category, or status
-- Get a price quote for buying or selling YES/NO shares before executing a trade
-- Execute a buy or sell trade on a prediction market with slippage protection
-- Check the agent's current position (share balances) in a market
-- Redeem winnings from a resolved prediction market
+| Goal | Subcommand |
+|------|-----------|
+| Browse available prediction markets | `list-markets` — filter by status, category, or featured flag |
+| Find markets about a specific topic | `search-markets --query <keyword>` |
+| Get full market details and trade history | `get-market --market-id <mongoId>` — uses MongoDB `_id`, not numeric marketId |
+| Check cost before buying shares | `quote-buy --market-id <id> --side yes\|no --amount <n>` — always quote first |
+| Check proceeds before selling shares | `quote-sell --market-id <id> --side yes\|no --amount <n>` — always quote first |
+| Buy YES shares in a market | `buy-yes --market-id <id> --amount <n> --max-cost <ustx>` |
+| Buy NO shares in a market | `buy-no --market-id <id> --amount <n> --max-cost <ustx>` |
+| Sell YES shares before resolution | `sell-yes --market-id <id> --amount <n> --min-proceeds <ustx>` |
+| Sell NO shares before resolution | `sell-no --market-id <id> --amount <n> --min-proceeds <ustx>` |
+| Redeem winnings after resolution | `redeem --market-id <id>` — only callable on resolved markets |
+| Check share balances in a market | `get-position --market-id <id>` |
 
-## Key Constraints
+## Safety Checks
 
-- Mainnet-only — all operations will error on testnet
-- Buy, sell, and redeem require an unlocked wallet (run `bun run wallet/wallet.ts unlock` first)
-- Always call `quote-buy` or `quote-sell` before trading — LMSR prices shift with each trade
-- Pass `--max-cost` from the quote result to `buy-yes` / `buy-no` as slippage protection
-- Pass `--min-proceeds` from the quote result to `sell-yes` / `sell-no` as slippage protection
-- Market IDs are epoch millisecond timestamps (e.g., `1771853629839`), distinct from the MongoDB `_id` used by `get-market`
-- Check `isResolved` and compare `endDate` to current time before trading — `isActive` can remain `true` after the market closes
+- Always run `quote-buy` or `quote-sell` before trading — LMSR prices shift with every trade; quotes go stale within seconds
+- Pass `totalCostUstx` from quote result as `--max-cost` when buying (slippage cap)
+- Pass `totalProceedsUstx` from quote result as `--min-proceeds` when selling (slippage floor)
+- Check `isResolved` in the market data before redeeming — only resolved markets pay out
+- Check `isActive` AND compare `endDate` to current time — `isActive` can remain `true` after the market closes; the contract owner must manually resolve
+- Verify wallet STX balance covers the full `totalCostUstx` plus ~100,000 uSTX gas before calling buy-yes or buy-no
+- Note: Market IDs are epoch millisecond timestamps (e.g., `1771853629839`); `get-market` uses MongoDB `_id` (hex string like `699c573ea7bb5ad25fee68a0`) — do not confuse the two
+- All write operations use `PostConditionMode.Allow` — this is required by the contract and is expected behavior
+
+## Error Handling
+
+| Error message | Cause | Fix |
+|--------------|-------|-----|
+| "stacks-market skill is mainnet-only. Set NETWORK=mainnet to use this skill." | NETWORK env var is not mainnet | Run with `NETWORK=mainnet bun run stacks-market/stacks-market.ts ...` |
+| "Wallet is locked. Run: bun run wallet/wallet.ts unlock" | Wallet not unlocked | Run `bun run wallet/wallet.ts unlock --password <password>` first |
+| "Quote returned no data. Market may not exist or be invalid." | Invalid market ID or inactive market | Verify market ID with `list-markets` or `get-market` first |
+| "--side must be 'yes' or 'no'" | Invalid `--side` value | Pass `--side yes` or `--side no` exactly |
+| "--amount must be a positive integer" | Non-integer or zero amount | Pass a whole number greater than 0 |
+| "Stacks Market API error (404)" | Market `_id` not found | Verify the MongoDB `_id` with `list-markets` |
+
+## Output Handling
+
+- `list-markets` and `search-markets`: extract `markets[].marketId` (numeric timestamp) for quoting/trading; extract `markets[]._id` (hex string) for `get-market`
+- `get-market`: check `isResolved` before redeeming; check `isActive` and `endDate` before buying
+- `quote-buy`: use `quote.totalCostUstx` as `--max-cost` for `buy-yes` or `buy-no`
+- `quote-sell`: use `quote.totalProceedsUstx` as `--min-proceeds` for `sell-yes` or `sell-no`
+- `buy-yes`, `buy-no`, `sell-yes`, `sell-no`, `redeem`: extract `txid` for status tracking; use `explorerUrl` to link to the transaction
+- `get-position`: extract `position.yesShares` and `position.noShares` to decide whether to sell or redeem
 
 ## Example Invocations
 
 ```bash
 # List 10 active markets in the Crypto category
-bun run stacks-market/stacks-market.ts list-markets --limit 10 --status active --category Crypto
+NETWORK=mainnet bun run stacks-market/stacks-market.ts list-markets --limit 10 --status active --category Crypto
 
-# Search for markets about Bitcoin
-bun run stacks-market/stacks-market.ts search-markets --query "bitcoin" --limit 5
+# Quote then buy 5 YES shares (use totalCostUstx from quote as --max-cost)
+NETWORK=mainnet bun run stacks-market/stacks-market.ts quote-buy --market-id 1771853629839 --side yes --amount 5
+NETWORK=mainnet bun run stacks-market/stacks-market.ts buy-yes --market-id 1771853629839 --amount 5 --max-cost 5500000
 
-# Quote the cost of buying 5 YES shares in a market
-bun run stacks-market/stacks-market.ts quote-buy --market-id 1771853629839 --side yes --amount 5
-
-# Buy 5 YES shares with 5.5 STX max spend (from quote result)
-bun run stacks-market/stacks-market.ts buy-yes --market-id 1771853629839 --amount 5 --max-cost 5500000
-
-# Check position in a market
-bun run stacks-market/stacks-market.ts get-position --market-id 1771853629839
-
-# Redeem winnings after resolution
-bun run stacks-market/stacks-market.ts redeem --market-id 1771853629839
+# Check position and redeem winnings after market resolves
+NETWORK=mainnet bun run stacks-market/stacks-market.ts get-position --market-id 1771853629839
+NETWORK=mainnet bun run stacks-market/stacks-market.ts redeem --market-id 1771853629839
 ```

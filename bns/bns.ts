@@ -9,7 +9,6 @@
 import { Command } from "commander";
 import { randomBytes } from "node:crypto";
 import { NETWORK, getExplorerTxUrl } from "../src/lib/config/networks.js";
-import { getWalletManager } from "../src/lib/services/wallet-manager.js";
 import { getAccount, getWalletAddress } from "../src/lib/services/x402.service.js";
 import { getBnsService } from "../src/lib/services/bns.service.js";
 import { printJson, handleError } from "../src/lib/utils/cli.js";

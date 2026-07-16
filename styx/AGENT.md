@@ -1,80 +1,73 @@
 ---
 name: styx-agent
 skill: styx
-description: BTC→sBTC conversion via Styx protocol — full headless deposit flow including PSBT signing, broadcast, and status tracking.
+description: BTC→sBTC conversion via Styx protocol — full headless deposit flow including pool status checks, PSBT signing, broadcast, and deposit tracking.
 ---
 
-# Styx Agent Instructions
+# Styx Agent
+
+This agent handles trustless BTC→sBTC conversion via the Styx protocol by FaktoryFun. It checks pool liquidity, estimates fees, creates deposit reservations, builds and signs PSBTs locally using the wallet's BTC keys, broadcasts to mempool.space, and tracks deposit status through confirmation. Use Styx for fast pool-based conversion of smaller amounts (10k–1M sats); use the native `sbtc` skill for direct protocol deposits of larger amounts.
 
 ## Prerequisites
 
-1. Wallet must be unlocked (`bun run wallet/wallet.ts unlock`) for deposit operations
-2. Wallet must have BTC balance at the `btcAddress` sufficient for deposit + fees
-3. Pool must have available liquidity (check with `pool-status`)
+- Wallet must be unlocked: `bun run wallet/wallet.ts unlock --password <password>`
+- Wallet must have sufficient BTC balance at `btcAddress` (deposit amount + network fee)
+- Pool must have available liquidity: verify with `pool-status` before depositing
+- `@faktoryfun/styx-sdk` and `@scure/btc-signer` packages must be installed (included in package.json)
 
 ## Decision Logic
 
-**When to use Styx vs native sBTC deposit:**
-- Styx: Fast, pool-based, smaller amounts (10k-1M sats), third-party liquidity
-- Native sBTC (`sbtc/sbtc.ts deposit`): Direct protocol deposit, larger amounts, requires Taproot keys
-
-**Pool selection:**
-- `main` (default): Legacy pool, max 300k sats, supports sbtc/usda/pepe swaps
-- `aibtc`: AI BTC pool, max 1M sats, supports sbtc/aibtc swaps
-
-## Deposit Flow
-
-1. **Pre-flight checks:**
-   ```
-   bun run styx/styx.ts pool-status --pool main
-   bun run styx/styx.ts fees
-   ```
-   Verify `estimatedAvailable` > your deposit amount. Check fee rates.
-
-2. **Execute deposit:**
-   ```
-   bun run styx/styx.ts deposit --amount 50000 --stx-receiver SP2GH... --btc-sender bc1q... --fee medium
-   ```
-   This handles the full flow: reservation → PSBT → sign → broadcast → status update.
-
-3. **Track status:**
-   ```
-   bun run styx/styx.ts status --id <deposit-id>
-   ```
-   Poll until status reaches `confirmed`.
+| Goal | Subcommand |
+|------|-----------|
+| Check available pool liquidity before depositing | `pool-status` — use `--pool main` or `--pool aibtc` |
+| List all available pools and their configs | `pools` — no arguments needed |
+| Get current Bitcoin network fee rates | `fees` — returns low/medium/high in sat/vB |
+| Get current BTC price in USD | `price` — no arguments needed |
+| Execute full BTC→sBTC deposit (reserve + sign + broadcast) | `deposit` — requires `--amount` in sats; optionally `--stx-receiver`, `--btc-sender`, `--pool`, `--fee` |
+| Check status of an existing deposit | `status` — use `--id <depositId>` or `--txid <btcTxId>` |
+| View deposit history for a Stacks address | `history` — use `--address` or omit for active wallet |
 
 ## Safety Checks
 
-- **Never deposit more than pool's `estimatedAvailable`** — the deposit will fail
-- **Verify BTC balance** covers amount + estimated fee before depositing
-- **Min 10,000 sats** — deposits below this are rejected
-- **Max varies by pool** — 300,000 sats (main) or 1,000,000 sats (aibtc)
-- **Always update status after broadcast** — failing to do so locks pool liquidity
+- **Check pool liquidity first** — run `pool-status` before `deposit`; depositing more than `estimatedAvailable` will fail
+- **Verify BTC balance** — wallet `btcAddress` must have enough sats to cover `--amount` plus estimated fee
+- **Minimum deposit: 10,000 sats** — the CLI enforces this with `MIN_DEPOSIT_SATS` from the SDK
+- **Pool maximums**: `main` pool caps at 300,000 sats; `aibtc` pool caps at 1,000,000 sats
+- **Ordinal safety (mainnet only)** — the CLI automatically filters out ordinal UTXOs using the Hiro Ordinals API; if all UTXOs contain inscriptions the deposit is blocked
+- **`--btc-sender` must match active wallet** — the CLI signs with the active wallet's keys; providing a different address will throw an error
+- **Update status after broadcast** — the CLI does this automatically (with one retry); if it fails, save `depositId` and `txid` for manual recovery to prevent pool liquidity from being locked indefinitely
 
 ## Error Handling
 
-| Error | Action |
-|-------|--------|
-| `HTTP error! status: 400` | Invalid params (check amount limits, addresses) |
-| `HTTP error! status: 401` | API key issue — use default SDK instance |
-| `HTTP error! status: 503` | Styx backend down — retry after 5 minutes |
-| Insufficient pool liquidity | Wait or try the other pool |
-| PSBT signing failure | Check wallet unlock state and BTC key availability |
-| Broadcast failure | Check mempool.space for network congestion |
+| Error message | Cause | Fix |
+|--------------|-------|-----|
+| `"Wallet is not unlocked. Use wallet/wallet.ts unlock first."` | Wallet not unlocked | Run `wallet unlock` |
+| `"Bitcoin keys not available. Unlock your wallet again."` | BTC keys missing from session | Re-run `wallet unlock` |
+| `"Amount X below minimum deposit (10000 sats)"` | Deposit amount too small | Use at least 10,000 sats |
+| `"Insufficient pool liquidity: need X sats, pool has ~Y sats"` | Pool does not have enough sBTC | Try the other pool or wait for liquidity |
+| `"All N UTXO(s) selected by Styx contain inscriptions."` | All UTXOs are ordinals on mainnet | Use a wallet with cardinal UTXOs for BTC deposits |
+| `"HTTP error! status: 400"` | Invalid deposit params | Check amount limits and address formats |
+| `"HTTP error! status: 503"` | Styx backend unavailable | Retry after 5 minutes |
+| `"Provide either --id <depositId> or --txid <btcTxId>"` | No identifier given to `status` | Pass `--id` or `--txid` |
 
 ## Output Handling
 
-The `deposit` command returns:
-```json
-{
-  "success": true,
-  "depositId": "abc123",
-  "txid": "def456...",
-  "explorerUrl": "https://mempool.space/tx/def456...",
-  "amount": { "sats": 50000, "btc": "0.00050000" },
-  "pool": "main",
-  "status": "broadcast"
-}
-```
+- **deposit**: extract `depositId` (save for tracking), `txid` (Bitcoin tx), `explorerUrl` (mempool.space link), `status` should be `"broadcast"`, `warning` field indicates status update failure (save `depositId` and `txid` for manual recovery)
+- **status**: extract `status` field — poll until it reaches `"confirmed"`; `stxTxId` appears once sBTC is minted on Stacks
+- **pool-status**: extract `estimatedAvailable` (BTC float) — multiply by 1e8 to convert to sats for comparison with deposit amount
+- **fees**: extract `low`, `medium`, `high` (sat/vB) to inform fee priority selection
+- **history**: extract `deposits` array with `id`, `status`, `btcAmount`, `sbtcAmount`, `btcTxId`
 
-Extract `depositId` and `txid` for follow-up tracking.
+## Example Invocations
+
+```bash
+# Check pool liquidity and fees before depositing
+bun run styx/styx.ts pool-status --pool main
+bun run styx/styx.ts fees
+
+# Execute a full BTC→sBTC deposit
+bun run styx/styx.ts deposit --amount 50000 --stx-receiver SP2GH... --fee medium
+
+# Track deposit status until confirmed
+bun run styx/styx.ts status --id <deposit-id>
+```

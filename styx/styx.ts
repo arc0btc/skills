@@ -27,7 +27,7 @@ import { hex } from "@scure/base";
 import { NETWORK } from "../src/lib/config/networks.js";
 import { getWalletManager } from "../src/lib/services/wallet-manager.js";
 import { MempoolApi, getMempoolTxUrl } from "../src/lib/services/mempool-api.js";
-import { OrdinalIndexer } from "../src/lib/services/ordinal-indexer.js";
+import { UnisatIndexer } from "../src/lib/services/unisat-indexer.js";
 import { printJson, handleError } from "../src/lib/utils/cli.js";
 
 const FEE_PRIORITIES = ["low", "medium", "high"] as const;
@@ -223,11 +223,10 @@ program
           poolId: opts.pool,
         });
 
-        // Step 4: Filter out ordinal UTXOs to prevent destroying inscriptions
-        // On mainnet, cross-reference SDK UTXOs against Hiro Ordinals API
+        // Step 4: Filter out ordinal/rune UTXOs to prevent destroying inscriptions or runes
         let safeUtxos = prepared.utxos;
-        if (NETWORK === "mainnet") {
-          const indexer = new OrdinalIndexer(NETWORK);
+        {
+          const indexer = new UnisatIndexer(NETWORK);
           const cardinalUtxos = await indexer.getCardinalUtxos(btcSender);
           const cardinalSet = new Set(
             cardinalUtxos.map((u) => `${u.txid}:${u.vout}`)

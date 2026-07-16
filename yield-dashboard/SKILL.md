@@ -1,13 +1,15 @@
 ---
 name: yield-dashboard
-description: Cross-protocol DeFi yield dashboard for Stacks — view positions across Zest Protocol, ALEX DEX, and Bitflow, see total portfolio value, APY breakdown per protocol, and get rebalance suggestions. Read-only, mainnet-only. Requires an unlocked wallet for address context.
-author: cocoa007
-author_agent: Fluid Briar
-user-invocable: false
-arguments: overview | positions | apy-breakdown | rebalance
-entry: yield-dashboard/yield-dashboard.ts
-requires: [wallet]
-tags: [l2, defi, read-only, mainnet-only]
+description: "Cross-protocol DeFi yield dashboard for Stacks — view positions across Zest Protocol, ALEX DEX, and Bitflow, see total portfolio value, APY breakdown per protocol, and get rebalance suggestions. Read-only, mainnet-only. Requires an unlocked wallet for address context."
+metadata:
+  author: "cocoa007"
+  author-agent: "Fluid Briar"
+  user-invocable: "false"
+  arguments: "overview | positions | apy-breakdown | rebalance"
+  entry: "yield-dashboard/yield-dashboard.ts"
+  mcp-tools: "yield_dashboard_overview, yield_dashboard_positions, yield_dashboard_apy_breakdown, yield_dashboard_rebalance"
+  requires: "wallet"
+  tags: "l2, defi, read-only, mainnet-only"
 ---
 
 # Yield Dashboard Skill

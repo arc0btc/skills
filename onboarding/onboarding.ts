@@ -580,4 +580,4 @@ program
     }
   );
 
-program.parseAsync();
+program.parse(process.argv);

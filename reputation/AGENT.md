@@ -8,41 +8,59 @@ description: ERC-8004 on-chain agent reputation management — submit and revoke
 
 This agent manages ERC-8004 on-chain agent reputation using the reputation-registry contract. It handles submitting and revoking feedback, appending responses to feedback entries, approving clients, and all read-only queries for reputation data. Read operations work without a wallet. Write operations require an unlocked wallet.
 
-## Capabilities
+## Prerequisites
 
-- Submit feedback for an agent with value, tags, and optional hash (give-feedback)
-- Revoke previously submitted feedback as the original submitter (revoke-feedback)
-- Append a response to an existing feedback entry (append-response)
-- Approve a client to submit feedback up to an index limit (approve-client)
-- Get aggregated reputation summary (count + WAD average) for an agent (get-summary)
-- Read a specific feedback entry by agent ID, client, and index (read-feedback)
-- Get a paginated list of all feedback entries with optional tag filtering (read-all-feedback)
-- Get a paginated list of clients who gave feedback for an agent (get-clients)
-- Get the total feedback count for an agent (get-feedback-count)
-- Check the approved feedback index limit for a client on an agent (get-approved-limit)
-- Get the last feedback index submitted by a client for an agent (get-last-index)
+- For write operations (give-feedback, revoke-feedback, append-response, approve-client): wallet must be unlocked — run `bun run wallet/wallet.ts unlock` first
+- For read operations (get-summary, read-feedback, read-all-feedback, get-clients, get-feedback-count, get-approved-limit, get-last-index): no wallet required
+- The target agent ID must exist in the identity registry before giving feedback
+- `revoke-feedback`: the active wallet must be the same address that originally submitted the feedback
+- `approve-client`: the active wallet must be the agent owner or an approved identity operator
 
-## When to Delegate Here
+## Decision Logic
 
-Delegate to this agent when the workflow needs to:
-- Record on-chain feedback about an agent's performance or behavior
-- Revoke inaccurate or outdated feedback previously submitted
-- Allow an agent to respond to feedback on its own record
-- Grant a client permission to submit feedback for an agent
-- Retrieve an agent's current reputation score or feedback history
-- Paginate through all feedback or clients for analytics or display
-- Check whether a client is authorized to submit more feedback
+| Goal | Subcommand |
+|------|-----------|
+| Submit feedback for an agent | `give-feedback --agent-id <id> --value <int>` — value can be negative |
+| Revoke feedback you previously submitted | `revoke-feedback --agent-id <id> --index <idx>` — only original submitter |
+| Append a response to a feedback entry | `append-response --agent-id <id> --client <addr> --index <idx> --response-uri <uri> --response-hash <hex>` |
+| Grant a client permission to submit feedback | `approve-client --agent-id <id> --client <addr> --index-limit <n>` |
+| Get the agent's total feedback count and average score | `get-summary --agent-id <id>` — read-only |
+| Read a specific feedback entry by submitter and index | `read-feedback --agent-id <id> --client <addr> --index <idx>` — read-only |
+| List all feedback with optional tag filtering | `read-all-feedback --agent-id <id>` — supports `--tag1`, `--tag2`, `--cursor` |
+| List all clients who submitted feedback | `get-clients --agent-id <id>` — paginated |
+| Get the total number of feedback entries for an agent | `get-feedback-count --agent-id <id>` — read-only |
+| Check how many feedback entries a client is approved to submit | `get-approved-limit --agent-id <id> --client <addr>` — read-only |
+| Get the last feedback index a client submitted | `get-last-index --agent-id <id> --client <addr>` — read-only |
 
-## Key Constraints
+## Safety Checks
 
-- give-feedback, revoke-feedback, append-response, and approve-client all require an unlocked wallet
-- revoke-feedback: tx-sender must be the original feedback submitter (the client address)
-- approve-client: tx-sender must be the agent owner or an approved identity operator
-- --feedback-hash and --response-hash must be exactly 32 bytes (64 hex characters); use SHA-256
-- Feedback values are signed integers (negative values are allowed for negative feedback)
-- Use --value-decimals to express fractional precision (e.g., value=5, value-decimals=1 means 0.5)
-- Pagination is cursor-based; pass the cursor from one response into the next call to page through results
-- Reputation is a Stacks L2 operation — check transaction status with `stx get-transaction-status` after write calls
+- `--feedback-hash` and `--response-hash` must be exactly 32 bytes (64 hex characters); compute with SHA-256 before passing
+- `revoke-feedback` is a Stacks write transaction and cannot be undone by a third party; only the original submitter's tx-sender can revoke
+- `approve-client` grants a client the ability to submit feedback — set `--index-limit` conservatively; approval cannot be revoked, only overwritten with a lower limit
+- Feedback values are signed integers — negative values represent negative feedback; use `--value-decimals` for fractional precision (e.g., value=5, decimals=1 means 0.5)
+- Pagination cursor is a non-negative integer from the previous response; passing an invalid cursor returns an error
+
+## Error Handling
+
+| Error message | Cause | Fix |
+|--------------|-------|-----|
+| "No active wallet. Please unlock your wallet first." | Write command called without an unlocked wallet | Run `bun run wallet/wallet.ts unlock --password <password>` |
+| "--agent-id must be a non-negative integer" | Invalid agent ID | Pass a non-negative integer (e.g., `--agent-id 42`) |
+| "--value must be an integer" | Non-numeric value passed to `--value` | Pass an integer (positive or negative) |
+| "--feedback-hash must be exactly 32 bytes (64 hex characters)" | Hash is wrong length or not valid hex | Compute SHA-256 of the data and pass the 64-char hex result |
+| "--response-hash must be exactly 32 bytes (64 hex characters)" | Response hash is wrong length or not valid hex | Compute SHA-256 of the response data |
+| "--cursor must be a non-negative integer" | Invalid pagination cursor | Use the `cursor` value from a previous paginated response |
+| "Feedback entry not found" | `read-feedback` found no entry at the given client + index | Verify the client address and index exist via `get-last-index` |
+
+## Output Handling
+
+- `give-feedback`: extract `txid` to track the transaction; `explorerUrl` links to the on-chain result
+- `get-summary`: extract `totalFeedback` (count) and `summaryValue` (WAD-averaged score as a big integer string, divide by 10^18 for the human value)
+- `read-feedback`: extract `value`, `valueDecimals`, `tag1`, `tag2`, and `isRevoked` to assess individual feedback entries
+- `read-all-feedback`: extract `items` (array of feedback entries) and `cursor` (null if last page); pass cursor to next call to paginate
+- `get-clients`: extract `clients` (array of Stacks addresses) and `cursor` for pagination
+- `get-approved-limit`: `approvedLimit` of 0 means the client has no approval; values > 0 indicate the max feedback count allowed
+- Write operations return `txid` and `explorerUrl`; confirm on-chain before reading updated state
 
 ## Example Invocations
 
@@ -50,39 +68,9 @@ Delegate to this agent when the workflow needs to:
 # Submit positive feedback for agent 42
 bun run reputation/reputation.ts give-feedback --agent-id 42 --value 5 --tag1 helpful
 
-# Submit feedback with a hash of supporting evidence
-bun run reputation/reputation.ts give-feedback --agent-id 42 --value 8 --value-decimals 1 --feedback-uri ipfs://evidence --feedback-hash a3f2b1...64hex
-
-# Revoke feedback you previously submitted (index 0)
-bun run reputation/reputation.ts revoke-feedback --agent-id 42 --index 0
-
-# Append a response to a feedback entry
-bun run reputation/reputation.ts append-response --agent-id 42 --client SP2... --index 0 --response-uri ipfs://myresponse --response-hash b4e9c2...64hex
-
-# Approve a client to submit up to 5 feedback entries
-bun run reputation/reputation.ts approve-client --agent-id 42 --client SP3... --index-limit 5
-
 # Get reputation summary for agent 42
 bun run reputation/reputation.ts get-summary --agent-id 42
 
-# Read a specific feedback entry
-bun run reputation/reputation.ts read-feedback --agent-id 42 --client SP2... --index 0
-
-# List all feedback, filtering by tag
-bun run reputation/reputation.ts read-all-feedback --agent-id 42 --tag1 helpful
-
-# List feedback with pagination
-bun run reputation/reputation.ts read-all-feedback --agent-id 42 --cursor 14
-
-# List all clients who gave feedback
-bun run reputation/reputation.ts get-clients --agent-id 42
-
-# Get total feedback count
-bun run reputation/reputation.ts get-feedback-count --agent-id 42
-
-# Check if a client is approved to give feedback
-bun run reputation/reputation.ts get-approved-limit --agent-id 42 --client SP3...
-
-# Get the last feedback index a client submitted
-bun run reputation/reputation.ts get-last-index --agent-id 42 --client SP3...
+# List all feedback with tag filtering (paginated)
+bun run reputation/reputation.ts read-all-feedback --agent-id 42 --tag1 helpful --cursor 0
 ```

@@ -35,3 +35,9 @@ export const DUST_THRESHOLD = 546;
  * Taproot input base size (vbytes) - without witness data
  */
 export const P2TR_INPUT_BASE_VBYTES = 57.5;
+
+/**
+ * Taproot witness overhead for Ordinals inscriptions (vbytes)
+ * Covers: control block + reveal script + Ordinals protocol framing (envelope)
+ */
+export const WITNESS_OVERHEAD_VBYTES = 80;

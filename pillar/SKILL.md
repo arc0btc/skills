@@ -1,13 +1,15 @@
 ---
 name: pillar
-description: Pillar smart wallet operations in two modes — browser-handoff (pillar.ts) opens the Pillar frontend for user signing, and agent-signed direct (pillar-direct.ts) signs locally with a secp256k1 keypair and submits directly to the Pillar API (no browser required, gas sponsored). Supports sBTC send/supply/boost/unwind, DCA programs, stacking, key management, wallet creation, and position queries.
-author: whoabuddy
-author_agent: Trustless Indra
-user-invocable: false
-arguments: connect | disconnect | status | send | fund | add-admin | supply | auto-compound | unwind | boost | position | create-wallet | invite | dca-invite | dca-partners | dca-leaderboard | dca-status | key-generate | key-unlock | key-lock | key-info | direct-boost | direct-unwind | direct-supply | direct-send | direct-auto-compound | direct-position | direct-withdraw-collateral | direct-add-admin | direct-create-wallet | direct-dca-invite | direct-dca-partners | direct-dca-leaderboard | direct-dca-status | direct-quote | direct-resolve-recipient | direct-stack-stx | direct-revoke-fast-pool | direct-stacking-status
-entry: [pillar/pillar.ts, pillar/pillar-direct.ts]
-requires: [wallet]
-tags: [l2, defi, write, mainnet-only]
+description: "Pillar smart wallet operations in two modes — browser-handoff (pillar.ts) opens the Pillar frontend for user signing, and agent-signed direct (pillar-direct.ts) signs locally with a secp256k1 keypair and submits directly to the Pillar API (no browser required, gas sponsored). Supports sBTC send/supply/boost/unwind, DCA programs, stacking, key management, wallet creation, and position queries."
+metadata:
+  author: "whoabuddy"
+  author-agent: "Trustless Indra"
+  user-invocable: "false"
+  arguments: "connect | disconnect | status | send | fund | add-admin | supply | auto-compound | unwind | boost | position | create-wallet | invite | dca-invite | dca-partners | dca-leaderboard | dca-status | key-generate | key-unlock | key-lock | key-info | direct-boost | direct-unwind | direct-supply | direct-send | direct-auto-compound | direct-position | direct-withdraw-collateral | direct-add-admin | direct-create-wallet | direct-dca-invite | direct-dca-partners | direct-dca-leaderboard | direct-dca-status | direct-quote | direct-resolve-recipient | direct-stack-stx | direct-revoke-fast-pool | direct-stacking-status"
+  entry: "pillar/pillar.ts, pillar/pillar-direct.ts"
+  mcp-tools: "pillar_connect, pillar_disconnect, pillar_status, pillar_send, pillar_fund, pillar_add_admin, pillar_supply, pillar_auto_compound, pillar_unwind, pillar_boost, pillar_position, pillar_create_wallet, pillar_invite, pillar_dca_invite, pillar_dca_partners, pillar_dca_leaderboard, pillar_dca_status, pillar_key_generate, pillar_key_unlock, pillar_key_lock, pillar_key_info, pillar_direct_boost, pillar_direct_unwind, pillar_direct_supply, pillar_direct_send, pillar_direct_auto_compound, pillar_direct_position, pillar_direct_withdraw_collateral, pillar_direct_add_admin, pillar_direct_create_wallet, pillar_direct_dca_invite, pillar_direct_dca_partners, pillar_direct_dca_leaderboard, pillar_direct_dca_status, pillar_direct_quote, pillar_direct_resolve_recipient, pillar_direct_stack_stx, pillar_direct_revoke_fast_pool, pillar_direct_stacking_status"
+  requires: "wallet"
+  tags: "l2, defi, write, mainnet-only"
 ---
 
 # Pillar Skill

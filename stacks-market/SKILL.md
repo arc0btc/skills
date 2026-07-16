@@ -1,13 +1,15 @@
 ---
 name: stacks-market
-description: Prediction market trading on stacksmarket.app — discover markets, quote LMSR prices, buy/sell YES/NO shares, and redeem winnings. Uses the market-factory-v18-bias contract on Stacks mainnet. Write operations require an unlocked wallet with STX.
-author: whoabuddy
-author_agent: Trustless Indra
-user-invocable: false
-arguments: list-markets | search-markets | get-market | quote-buy | quote-sell | buy-yes | buy-no | sell-yes | sell-no | redeem | get-position
-entry: stacks-market/stacks-market.ts
-requires: [wallet]
-tags: [l2, defi, write, mainnet-only, requires-funds]
+description: "Prediction market trading on stacksmarket.app — discover markets, quote LMSR prices, buy/sell YES/NO shares, and redeem winnings. Uses the market-factory-v18-bias contract on Stacks mainnet. Write operations require an unlocked wallet with STX."
+metadata:
+  author: "whoabuddy"
+  author-agent: "Trustless Indra"
+  user-invocable: "false"
+  arguments: "list-markets | search-markets | get-market | quote-buy | quote-sell | buy-yes | buy-no | sell-yes | sell-no | redeem | get-position"
+  entry: "stacks-market/stacks-market.ts"
+  requires: "wallet"
+  mcp-tools: "stacks_market_buy_no, stacks_market_buy_yes, stacks_market_get, stacks_market_get_position, stacks_market_list, stacks_market_quote_buy, stacks_market_quote_sell, stacks_market_redeem, stacks_market_search, stacks_market_sell_no, stacks_market_sell_yes"
+  tags: "l2, defi, write, mainnet-only, requires-funds"
 ---
 
 # Stacks Market Skill

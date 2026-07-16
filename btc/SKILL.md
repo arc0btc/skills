@@ -1,18 +1,22 @@
 ---
 name: btc
-description: Bitcoin L1 operations — check balances, estimate fees, list UTXOs, transfer BTC, and classify UTXOs as cardinal (safe to spend) or ordinal (contain inscriptions). Data sourced from mempool.space and the Hiro Ordinals API.
-author: whoabuddy
-author_agent: Trustless Indra
-user-invocable: false
-arguments: balance | fees | utxos | transfer | get-cardinal-utxos | get-ordinal-utxos | get-inscriptions
-entry: btc/btc.ts
-requires: [wallet]
-tags: [l1, write, requires-funds]
+description: "Bitcoin L1 operations — check balances, estimate fees, list UTXOs, transfer BTC, and classify UTXOs as cardinal (safe to spend), ordinal (inscriptions), or rune (rune tokens). Data sourced from mempool.space and the Unisat API."
+metadata:
+  author: "whoabuddy"
+  author-agent: "Trustless Indra"
+  user-invocable: "false"
+  arguments: "balance | fees | utxos | transfer | get-cardinal-utxos | get-ordinal-utxos | get-rune-utxos | get-inscriptions"
+  entry: "btc/btc.ts"
+  mcp-tools: "get_btc_balance, get_btc_fees, get_btc_utxos, transfer_btc, get_cardinal_utxos, get_ordinal_utxos, get_rune_utxos, get_inscriptions_by_address"
+  requires: "wallet"
+  tags: "l1, write, requires-funds"
 ---
 
 # BTC Skill
 
-Provides Bitcoin L1 operations using mempool.space (free, no auth) and the Hiro Ordinals API (for inscription/cardinal classification on mainnet). Transfer operations require an unlocked wallet. Balance and fee queries work without a wallet.
+Provides Bitcoin L1 operations using mempool.space (free, no auth) and the Unisat API (for inscription/rune/cardinal UTXO classification on both mainnet and testnet). Transfer operations require an unlocked wallet. Balance and fee queries work without a wallet.
+
+Requires `UNISAT_API_KEY` environment variable for UTXO classification commands.
 
 ## Usage
 
@@ -81,36 +85,11 @@ Options:
 - `--address` (optional) — Bitcoin address to check (uses active wallet if omitted)
 - `--confirmed-only` (flag) — Only return confirmed UTXOs
 
-Output:
-```json
-{
-  "address": "bc1q...",
-  "network": "mainnet",
-  "utxos": [
-    {
-      "txid": "abc123...",
-      "vout": 0,
-      "value": { "satoshis": 500000, "btc": "0.005 BTC" },
-      "confirmed": true,
-      "blockHeight": 800000,
-      "blockTime": "2024-01-01T00:00:00.000Z"
-    }
-  ],
-  "summary": {
-    "count": 1,
-    "totalValue": { "satoshis": 500000, "btc": "0.005 BTC" },
-    "confirmedCount": 1,
-    "unconfirmedCount": 0
-  },
-  "explorerUrl": "https://mempool.space/address/bc1q..."
-}
-```
-
 ### transfer
 
 Transfer BTC to a recipient address. Requires an unlocked wallet with BTC balance.
 
-By default only uses cardinal UTXOs (safe to spend — no inscriptions). Set `--include-ordinals` to allow spending ordinal UTXOs (advanced users only — WARNING: may destroy valuable inscriptions).
+By default only uses cardinal UTXOs (safe to spend — no inscriptions or runes). Set `--include-ordinals` to allow spending all UTXOs (advanced users only — WARNING: may destroy valuable inscriptions or runes).
 
 ```
 bun run btc/btc.ts transfer --recipient <addr> --amount <satoshis> [--fee-rate fast|medium|slow|<number>] [--include-ordinals]
@@ -120,30 +99,11 @@ Options:
 - `--recipient` (required) — Bitcoin address to send to
 - `--amount` (required) — Amount in satoshis (1 BTC = 100,000,000 satoshis)
 - `--fee-rate` (optional) — `fast`, `medium`, `slow`, or a number in sat/vB (default: `medium`)
-- `--include-ordinals` (flag) — Include ordinal UTXOs (WARNING: may destroy inscriptions!)
-
-Output:
-```json
-{
-  "success": true,
-  "txid": "def456...",
-  "explorerUrl": "https://mempool.space/tx/def456...",
-  "transaction": {
-    "recipient": "bc1q...",
-    "amount": { "satoshis": 100000, "btc": "0.001 BTC" },
-    "fee": { "satoshis": 1200, "btc": "0.000012 BTC", "rateUsed": "8 sat/vB" },
-    "change": { "satoshis": 398800, "btc": "0.003988 BTC" },
-    "vsize": 150,
-    "utxoType": "cardinal-only"
-  },
-  "sender": "bc1q...",
-  "network": "mainnet"
-}
-```
+- `--include-ordinals` (flag) — Include all UTXOs (WARNING: may destroy inscriptions or runes!)
 
 ### get-cardinal-utxos
 
-Get cardinal UTXOs (safe to spend — no inscriptions). Only available on mainnet.
+Get cardinal UTXOs (safe to spend — no inscriptions or runes).
 
 ```
 bun run btc/btc.ts get-cardinal-utxos [--address <addr>] [--confirmed-only]
@@ -153,21 +113,9 @@ Options:
 - `--address` (optional) — Bitcoin address to check (uses active wallet if omitted)
 - `--confirmed-only` (flag) — Only return confirmed UTXOs
 
-Output:
-```json
-{
-  "address": "bc1q...",
-  "network": "mainnet",
-  "type": "cardinal",
-  "utxos": [...],
-  "summary": { "count": 2, "totalValue": { "satoshis": 500000, "btc": "0.005 BTC" }, "confirmedCount": 2, "unconfirmedCount": 0 },
-  "explorerUrl": "https://mempool.space/address/bc1q..."
-}
-```
-
 ### get-ordinal-utxos
 
-Get ordinal UTXOs (contain inscriptions — do not spend in regular transfers). Only available on mainnet.
+Get ordinal UTXOs (contain inscriptions — do not spend in regular transfers).
 
 ```
 bun run btc/btc.ts get-ordinal-utxos [--address <addr>] [--confirmed-only]
@@ -177,21 +125,21 @@ Options:
 - `--address` (optional) — Bitcoin address to check (uses active wallet if omitted)
 - `--confirmed-only` (flag) — Only return confirmed UTXOs
 
-Output:
-```json
-{
-  "address": "bc1q...",
-  "network": "mainnet",
-  "type": "ordinal",
-  "utxos": [...],
-  "summary": { "count": 1, "totalValue": { "satoshis": 546, "btc": "0.00000546 BTC" }, "confirmedCount": 1, "unconfirmedCount": 0 },
-  "explorerUrl": "https://mempool.space/address/bc1q..."
-}
+### get-rune-utxos
+
+Get rune UTXOs (contain rune balances — do not spend in regular transfers).
+
 ```
+bun run btc/btc.ts get-rune-utxos [--address <addr>] [--confirmed-only]
+```
+
+Options:
+- `--address` (optional) — Bitcoin address to check (uses active wallet if omitted)
+- `--confirmed-only` (flag) — Only return confirmed UTXOs
 
 ### get-inscriptions
 
-Get all inscriptions owned by a Bitcoin address. Only available on mainnet (Hiro Ordinals API).
+Get all inscriptions owned by a Bitcoin address via the Unisat API.
 
 ```
 bun run btc/btc.ts get-inscriptions [--address <addr>]
@@ -214,10 +162,9 @@ Output:
       "output": "abc123...:0",
       "location": "abc123...:0:0",
       "offset": 0,
+      "outputValue": 546,
       "genesis": {
         "txid": "abc123...",
-        "blockHeight": 800000,
-        "blockHash": "000000...",
         "timestamp": "2024-01-01T00:00:00.000Z"
       }
     }
@@ -230,6 +177,7 @@ Output:
 ## Notes
 
 - All fee queries use the public mempool.space API (no authentication required)
-- `get-cardinal-utxos`, `get-ordinal-utxos`, and `get-inscriptions` require mainnet; on testnet no inscription indexing is available
-- `transfer` is safe by default — it skips UTXOs that contain inscriptions
+- UTXO classification (cardinal/ordinal/rune) uses the Unisat API and works on both mainnet and testnet
+- `transfer` is safe by default — it skips UTXOs that contain inscriptions or runes
 - Wallet operations require an unlocked wallet (use `bun run wallet/wallet.ts unlock` first)
+- Set `UNISAT_API_KEY` environment variable for Unisat API access

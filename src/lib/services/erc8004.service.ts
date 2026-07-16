@@ -24,6 +24,7 @@ import { HiroApiService, getHiroApi } from "./hiro-api.js";
 import { getErc8004Contracts, parseContractId, type Network } from "../config/index.js";
 import { callContract, type Account, type TransferResult } from "../transactions/builder.js";
 import { sponsoredContractCall } from "../transactions/sponsor-builder.js";
+import { createNftSendPostCondition } from "../transactions/post-conditions.js";
 
 // ============================================================================
 // Types
@@ -391,11 +392,21 @@ export class Erc8004Service {
   ): Promise<TransferResult> {
     const { address, name } = parseContractId(this.contracts.identityRegistry);
 
+    const postConditions = [
+      createNftSendPostCondition(
+        sender,
+        this.contracts.identityRegistry,
+        "agent-identity",
+        tokenId
+      ),
+    ];
+
     const contractCallOptions = {
       contractAddress: address,
       contractName: name,
       functionName: "transfer",
       functionArgs: [uintCV(tokenId), principalCV(sender), principalCV(recipient)],
+      postConditions,
       fee,
     };
 

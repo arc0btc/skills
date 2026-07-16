@@ -60,14 +60,7 @@ program
     }) => {
       try {
         const nftService = getNftService(NETWORK);
-        let walletAddress: string;
-
-        if (opts.address) {
-          walletAddress = opts.address;
-        } else {
-          walletAddress = await getWalletAddress();
-        }
-
+        const walletAddress = opts.address ?? (await getWalletAddress());
         const limit = parseInt(opts.limit, 10);
         const offset = parseInt(opts.offset, 10);
 

@@ -4,6 +4,9 @@
  * No external x402 SDK dependency — all logic is self-contained.
  */
 
+import { randomUUID } from "node:crypto";
+import type { TrackedPaymentState } from "@aibtc/tx-schemas/core/enums";
+
 // ===== Types =====
 
 /**
@@ -97,6 +100,55 @@ export interface SettlementResponseV2 {
   transaction: string;
   /** Network identifier in CAIP-2 format */
   network: NetworkV2;
+  /** Legacy settlement hint. Caller-facing state should come from payment-status polling. */
+  paymentStatus?: TrackedPaymentState | "pending";
+}
+
+// ===== Conflict Error Types (per landing-page#522) =====
+
+/**
+ * Error codes returned by the relay in 409 responses.
+ * @see https://github.com/aibtcdev/landing-page/issues/522
+ */
+export type ConflictErrorCode =
+  | "SENDER_NONCE_DUPLICATE"
+  | "SENDER_NONCE_STALE"
+  | "SENDER_NONCE_GAP"
+  | "NONCE_CONFLICT";
+
+/** Structured 409 conflict error response from the relay. */
+export interface ConflictErrorResponse {
+  code: ConflictErrorCode;
+  message?: string;
+  retryable?: boolean;
+  retryAfter?: number;
+}
+
+// ===== Payment Identifier Extension =====
+
+/** Extension for relay-side dedup of payment attempts. */
+export interface PaymentIdentifierExtension {
+  [key: string]: unknown;
+  "payment-identifier": {
+    info: { id: string };
+  };
+}
+
+/** Generate a unique client-side idempotency key for relay dedup. */
+export function generatePaymentIdentifier(): string {
+  const hex = randomUUID().replace(/-/g, "");
+  return `pay_${hex}`;
+}
+
+/** Build the payment-identifier extension object for PaymentPayloadV2. */
+export function buildPaymentIdentifierExtension(
+  id: string
+): PaymentIdentifierExtension {
+  return {
+    "payment-identifier": {
+      info: { id },
+    },
+  };
 }
 
 // ===== Constants =====

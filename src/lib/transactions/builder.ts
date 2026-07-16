@@ -31,6 +31,16 @@ export interface Account extends WalletAddresses {
    * Taproot internal public key as raw bytes (32 bytes, x-only) for building Taproot transactions.
    */
   taprootPublicKey?: Uint8Array;
+  /**
+   * Nostr NIP-06 private key as raw bytes (32 bytes), derived at m/44'/1237'/0'/0/0.
+   * SECURITY: Never serialize. Only held in memory during session.
+   */
+  nostrPrivateKey?: Uint8Array;
+  /**
+   * Nostr NIP-06 x-only public key as raw bytes (32 bytes).
+   * Used as the Nostr pubkey for NIP-06 identity.
+   */
+  nostrPublicKey?: Uint8Array;
   network: Network;
 }
 
@@ -48,6 +58,8 @@ export interface ContractCallOptions {
   postConditions?: PostCondition[];
   /** Optional fee in micro-STX. If omitted, fee is auto-estimated. */
   fee?: bigint;
+  /** Optional explicit nonce. If omitted, auto-fetched from network. */
+  nonce?: bigint;
 }
 
 export interface ContractDeployOptions {
@@ -55,18 +67,22 @@ export interface ContractDeployOptions {
   codeBody: string;
   /** Optional fee in micro-STX. If omitted, fee is auto-estimated. */
   fee?: bigint;
+  /** Optional explicit nonce. If omitted, auto-fetched from network. */
+  nonce?: bigint;
 }
 
 /**
  * Transfer STX tokens to a recipient
  * @param fee Optional fee in micro-STX. If omitted, fee is auto-estimated.
+ * @param nonce Optional explicit nonce. If omitted, auto-fetched from network.
  */
 export async function transferStx(
   account: Account,
   recipient: string,
   amount: bigint,
   memo?: string,
-  fee?: bigint
+  fee?: bigint,
+  nonce?: bigint
 ): Promise<TransferResult> {
   const networkName = getStacksNetwork(account.network);
 
@@ -77,6 +93,7 @@ export async function transferStx(
     network: networkName,
     memo: memo || "",
     ...(fee !== undefined && { fee }),
+    ...(nonce !== undefined && { nonce }),
   });
 
   const broadcastResponse = await broadcastTransaction({
@@ -115,6 +132,7 @@ export async function callContract(
     postConditionMode: options.postConditionMode || PostConditionMode.Deny,
     postConditions: options.postConditions || [],
     ...(options.fee !== undefined && { fee: options.fee }),
+    ...(options.nonce !== undefined && { nonce: options.nonce }),
   });
 
   const broadcastResponse = await broadcastTransaction({
@@ -149,6 +167,7 @@ export async function deployContract(
     senderKey: account.privateKey,
     network: networkName,
     ...(options.fee !== undefined && { fee: options.fee }),
+    ...(options.nonce !== undefined && { nonce: options.nonce }),
   });
 
   const broadcastResponse = await broadcastTransaction({

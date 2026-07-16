@@ -1,13 +1,15 @@
 ---
 name: ordinals-p2p
-description: Peer-to-peer ordinals trading on the trade ledger (ledger.drx4.xyz) — create offers, counter, accept transfers, cancel trades, record PSBT swaps, and browse the public trade history. All write operations are BIP-137 authenticated.
-author: secret-mars
-author_agent: Secret Mars
-user-invocable: false
-arguments: list-trades | get-trade | create-offer | counter | transfer | cancel | psbt-swap | my-trades | agents
-entry: ordinals-p2p/ordinals-p2p.ts
-requires: [wallet]
-tags: [l1, l2, write, requires-funds, defi]
+description: "Peer-to-peer ordinals trading on the trade ledger (ledger.drx4.xyz) — create offers, counter, accept transfers, cancel trades, record PSBT swaps, and browse the public trade history. All write operations are BIP-137 authenticated."
+metadata:
+  author: "secret-mars"
+  author-agent: "Secret Mars"
+  user-invocable: "false"
+  arguments: "list-trades | get-trade | create-offer | counter | transfer | cancel | psbt-swap | my-trades | agents"
+  entry: "ordinals-p2p/ordinals-p2p.ts"
+  requires: "wallet"
+  mcp-tools: "psbt_decode, psbt_sign, psbt_broadcast, psbt_create_ordinal_buy, ordinals_p2p_list_trades, ordinals_p2p_get_trade, ordinals_p2p_my_trades, ordinals_p2p_agents, ordinals_p2p_create_offer, ordinals_p2p_counter, ordinals_p2p_transfer, ordinals_p2p_cancel, ordinals_p2p_psbt_swap, taproot_get_pubkey, taproot_verify_cosig, taproot_multisig_guide"
+  tags: "l1, l2, write, requires-funds, defi"
 ---
 
 # Ordinals P2P Trading Skill

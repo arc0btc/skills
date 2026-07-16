@@ -131,24 +131,31 @@ Every `SKILL.md` begins with YAML frontmatter that drives skill discovery and th
 ```yaml
 ---
 name: btc
-description: Bitcoin L1 operations — check balances, estimate fees, list UTXOs, transfer BTC, and classify UTXOs as cardinal or ordinal.
-user-invocable: false
-arguments: balance | fees | utxos | transfer | get-cardinal-utxos | get-ordinal-utxos | get-inscriptions
-entry: btc/btc.ts
-requires: [wallet]
-tags: [l1, write, requires-funds]
+description: "Bitcoin L1 operations — check balances, estimate fees, list UTXOs, transfer BTC, and classify UTXOs as cardinal or ordinal."
+metadata:
+  author: "whoabuddy"
+  author-agent: "Trustless Indra"
+  user-invocable: "false"
+  arguments: "balance | fees | utxos | transfer | get-cardinal-utxos | get-ordinal-utxos | get-inscriptions"
+  entry: "btc/btc.ts"
+  mcp-tools: "get_btc_balance, get_btc_fees, get_btc_utxos, transfer_btc, get_cardinal_utxos, get_ordinal_utxos, get_inscriptions_by_address"
+  requires: "wallet"
+  tags: "l1, write, requires-funds"
 ---
 ```
 
 | Field | Description |
 |-------|-------------|
 | `name` | Skill identifier (matches directory name) |
-| `description` | One-line description for Claude Code discovery |
-| `user-invocable` | Always `false` — Claude Code invokes skills, not end users directly |
-| `arguments` | Pipe-separated list of subcommands |
-| `entry` | Path to the CLI script(s), relative to repo root. Use bracket list for multiple: `[pillar/pillar.ts, pillar/pillar-direct.ts]` |
-| `requires` | Skills that must be configured first (e.g. `[wallet]`) |
-| `tags` | Controlled vocabulary: `read-only`, `write`, `mainnet-only`, `requires-funds`, `sensitive`, `infrastructure`, `defi`, `l1`, `l2` |
+| `description` | One-line description for Claude Code discovery (quoted string) |
+| `metadata.author` | Skill author GitHub handle |
+| `metadata.author-agent` | Agent name associated with the author |
+| `metadata.user-invocable` | Always `"false"` — Claude Code invokes skills, not end users directly |
+| `metadata.arguments` | Pipe-separated list of subcommands (quoted string) |
+| `metadata.entry` | Path to the CLI script(s), relative to repo root. Comma-separated for multiple: `"pillar/pillar.ts, pillar/pillar-direct.ts"` |
+| `metadata.mcp-tools` | Optional comma-separated MCP tool names from aibtc-mcp-server |
+| `metadata.requires` | Comma-separated skills that must be configured first (e.g. `"wallet"`) |
+| `metadata.tags` | Comma-separated tags. Controlled vocabulary: `read-only`, `write`, `mainnet-only`, `requires-funds`, `sensitive`, `infrastructure`, `defi`, `l1`, `l2` |
 
 ### AGENT.md Content Guidelines
 

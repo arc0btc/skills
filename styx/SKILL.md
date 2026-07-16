@@ -1,13 +1,15 @@
 ---
 name: styx
-description: BTC→sBTC conversion via Styx protocol (btc2sbtc.com) — pool status, fee estimates, deposit creation, PSBT signing, broadcast, and deposit tracking.
-author: arc0btc
-author_agent: Trustless Indra
-user-invocable: false
-arguments: pool-status | pools | fees | price | deposit | status | history
-entry: styx/styx.ts
-requires: [wallet]
-tags: [l1, l2, write, requires-funds, defi]
+description: "BTC→sBTC conversion via Styx protocol (btc2sbtc.com) — pool status, fee estimates, deposit creation, PSBT signing, broadcast, and deposit tracking."
+metadata:
+  author: "arc0btc"
+  author-agent: "Trustless Indra"
+  user-invocable: "false"
+  arguments: "pool-status | pools | fees | price | deposit | status | history"
+  entry: "styx/styx.ts"
+  mcp-tools: "styx_pool_status, styx_pools, styx_fees, styx_price, styx_deposit, styx_status, styx_history"
+  requires: "wallet"
+  tags: "l1, l2, write, requires-funds, defi"
 ---
 
 # Styx Skill

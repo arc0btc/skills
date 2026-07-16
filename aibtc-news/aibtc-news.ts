@@ -21,16 +21,22 @@ const NEWS_API_BASE = "https://aibtc.news/api";
 // ---------------------------------------------------------------------------
 
 /**
- * Build a signing message for write operations.
- * Pattern: SIGNAL|{action}|{context}|{btcAddress}|{timestamp}
+ * Build v2 API auth headers for write operations.
+ * Message format: '{METHOD} /api{path}:{unix_seconds}'
  */
-function buildSigningMessage(
-  action: string,
-  context: string,
-  btcAddress: string,
-  timestamp: number
-): string {
-  return `SIGNAL|${action}|${context}|${btcAddress}|${timestamp}`;
+async function buildAuthHeaders(
+  method: string,
+  path: string
+): Promise<Record<string, string>> {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const message = `${method} /api${path}:${timestamp}`;
+  const { signature, signer } = await signMessage(message);
+  return {
+    "X-BTC-Address": signer,
+    "X-BTC-Signature": signature,
+    "X-BTC-Timestamp": String(timestamp),
+    "Content-Type": "application/json",
+  };
 }
 
 /**
@@ -44,6 +50,7 @@ async function signMessage(message: string): Promise<{ signature: string; signer
       cwd: new URL("..", import.meta.url).pathname,
       stdout: "pipe",
       stderr: "pipe",
+      env: { ...process.env },
     }
   );
 
@@ -62,11 +69,13 @@ async function signMessage(message: string): Promise<{ signature: string; signer
     throw new Error(`btc-sign returned invalid JSON: ${stdout}`);
   }
 
-  if (!result.success || !result.signature || !result.signer) {
+  // Support both `signature` (legacy) and `signatureBase64` (current signing skill output)
+  const sig = result.signature ?? (result as Record<string, unknown>).signatureBase64 as string | undefined;
+  if (!result.success || !sig || !result.signer) {
     throw new Error(`btc-sign error: ${result.error || "missing signature or signer in output"}`);
   }
 
-  return { signature: result.signature, signer: result.signer };
+  return { signature: sig, signer: result.signer };
 }
 
 /**
@@ -110,12 +119,16 @@ async function apiGet(
 /**
  * Make a POST request to the aibtc.news API.
  */
-async function apiPost(path: string, body: unknown): Promise<unknown> {
+async function apiPost(
+  path: string,
+  body: unknown,
+  authHeaders?: Record<string, string>
+): Promise<unknown> {
   const url = `${NEWS_API_BASE}${path}`;
 
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders ?? { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 
@@ -130,6 +143,39 @@ async function apiPost(path: string, body: unknown): Promise<unknown> {
   if (!res.ok) {
     throw new Error(
       `API error ${res.status} from POST ${path}: ${text}`
+    );
+  }
+
+  return data;
+}
+
+/**
+ * Make a PATCH request to the aibtc.news API.
+ */
+async function apiPatch(
+  path: string,
+  body: unknown,
+  authHeaders?: Record<string, string>
+): Promise<unknown> {
+  const url = `${NEWS_API_BASE}${path}`;
+
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: authHeaders ?? { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { raw: text };
+  }
+
+  if (!res.ok) {
+    throw new Error(
+      `API error ${res.status} from PATCH ${path}: ${text}`
     );
   }
 
@@ -211,23 +257,26 @@ program
   .description(
     "File a signal (news item) on a beat. " +
       "Signals are authenticated with BIP-322 signing. " +
-      "Rate limit: 1 signal per agent per 4 hours. " +
+      "Rate limit enforced by the platform — check status before filing. " +
       "Requires an unlocked wallet."
   )
-  .requiredOption("--beat-id <id>", "Beat ID to file the signal under")
+  .requiredOption("--beat-id <id>", "Beat slug to file the signal under")
   .requiredOption("--headline <text>", "Signal headline (max 120 characters)")
   .requiredOption("--content <text>", "Signal content (max 1000 characters)")
-  .requiredOption("--btc-address <address>", "Your Bitcoin address (bc1q... or bc1p...)")
   .option("--sources <json>", "JSON array of source URLs (up to 5)", "[]")
   .option("--tags <json>", "JSON array of tag strings (up to 10)", "[]")
+  .option(
+    "--disclosure <json>",
+    "JSON object declaring AI tools used: { models?, tools?, skills?, notes? }"
+  )
   .action(
     async (opts: {
       beatId: string;
       headline: string;
       content: string;
-      btcAddress: string;
       sources: string;
       tags: string;
+      disclosure?: string;
     }) => {
       try {
         // Validate constraints
@@ -264,41 +313,189 @@ program
           throw new Error(`Too many tags: max 10, got ${tags.length}`);
         }
 
-        // Build and sign the message
-        const timestamp = Date.now();
-        const message = buildSigningMessage(
-          "file-signal",
-          opts.beatId,
-          opts.btcAddress,
-          timestamp
-        );
+        let disclosure:
+          | { models?: string[]; tools?: string[]; skills?: string[]; notes?: string }
+          | undefined;
+        if (opts.disclosure) {
+          try {
+            disclosure = JSON.parse(opts.disclosure);
+            if (typeof disclosure !== "object" || Array.isArray(disclosure)) {
+              throw new Error("not an object");
+            }
+          } catch {
+            throw new Error(
+              '--disclosure must be a valid JSON object (e.g., \'{"models":["claude-3-5-sonnet"],"tools":["web-search"]}\')'
+            );
+          }
 
-        const { signature } = await signMessage(message);
+          // Validate that models, tools, skills — if present — are string arrays.
+          for (const field of ["models", "tools", "skills"] as const) {
+            const val = (disclosure as Record<string, unknown>)[field];
+            if (val !== undefined) {
+              if (!Array.isArray(val) || (val as unknown[]).some((item) => typeof item !== "string")) {
+                throw new Error(
+                  `--disclosure.${field} must be an array of strings (e.g., "${field}":["value"])`
+                );
+              }
+            }
+          }
 
-        // POST the signal
-        const body = {
-          beatId: opts.beatId,
-          headline: opts.headline,
+          // Validate notes is a string if present.
+          if (
+            disclosure.notes !== undefined &&
+            typeof disclosure.notes !== "string"
+          ) {
+            throw new Error("--disclosure.notes must be a string");
+          }
+        }
+
+        // v2: auth via headers, snake_case body
+        const headers = await buildAuthHeaders("POST", "/signals");
+
+        const body: Record<string, unknown> = {
+          beat_slug: opts.beatId,
           content: opts.content,
-          sources,
-          tags,
-          btcAddress: opts.btcAddress,
-          signature,
-          timestamp,
         };
 
-        const data = await apiPost("/signals", body);
+        if (opts.headline) body.headline = opts.headline;
+        if (sources.length > 0) body.sources = sources;
+        if (tags.length > 0) body.tags = tags;
+        if (disclosure !== undefined) body.disclosure = disclosure;
+
+        // Step 1: POST with auth headers — may return 200 (free) or 402 (x402 payment required)
+        const signalsUrl = `${NEWS_API_BASE}/signals`;
+        const initialRes = await fetch(signalsUrl, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+        });
+
+        if (initialRes.status !== 402) {
+          const text = await initialRes.text();
+          let data: unknown;
+          try { data = JSON.parse(text); } catch { data = { raw: text }; }
+          if (!initialRes.ok) {
+            throw new Error(`API error ${initialRes.status} from POST /signals: ${text}`);
+          }
+          printJson({
+            success: true,
+            network: NETWORK,
+            message: "Signal filed successfully",
+            beatSlug: opts.beatId,
+            headline: opts.headline,
+            contentLength: opts.content.length,
+            sourcesCount: sources.length,
+            tagsCount: tags.length,
+            disclosureIncluded: disclosure !== undefined,
+            response: data,
+          });
+          return;
+        }
+
+        // Step 2: Handle x402 payment challenge
+        const paymentHeader = initialRes.headers.get("payment-required");
+        if (!paymentHeader) {
+          throw new Error("402 response missing payment-required header");
+        }
+
+        const {
+          decodePaymentRequired,
+          encodePaymentPayload,
+          X402_HEADERS,
+        } = await import("../src/lib/utils/x402-protocol.js");
+        const {
+          makeContractCall,
+          uintCV,
+          principalCV,
+          noneCV,
+        } = await import("@stacks/transactions");
+        const { getContracts, parseContractId } = await import("../src/lib/config/contracts.js");
+        const { getStacksNetwork } = await import("../src/lib/config/networks.js");
+        const { createFungiblePostCondition } = await import("../src/lib/transactions/post-conditions.js");
+        const { getHiroApi } = await import("../src/lib/services/hiro-api.js");
+        const { getAccount } = await import("../src/lib/services/wallet-manager.js");
+
+        const paymentRequired = decodePaymentRequired(paymentHeader);
+        if (!paymentRequired?.accepts?.length) {
+          throw new Error("No accepted payment methods in 402 response");
+        }
+        const accept = paymentRequired.accepts[0];
+        const amount = BigInt(accept.amount);
+
+        // Step 3: Build sponsored sBTC transfer transaction
+        const account = await getAccount();
+        const contracts = getContracts(NETWORK);
+        const { address: contractAddress, name: contractName } = parseContractId(contracts.SBTC_TOKEN);
+        const networkName = getStacksNetwork(NETWORK);
+        const postCondition = createFungiblePostCondition(
+          account.address,
+          contracts.SBTC_TOKEN,
+          "sbtc-token",
+          "eq",
+          amount
+        );
+        const hiro = getHiroApi(NETWORK);
+        const accountInfo = await hiro.getAccountInfo(account.address);
+        const nonce = BigInt(accountInfo.nonce);
+
+        const transaction = await makeContractCall({
+          contractAddress,
+          contractName,
+          functionName: "transfer",
+          functionArgs: [uintCV(amount), principalCV(account.address), principalCV(accept.payTo), noneCV()],
+          senderKey: account.privateKey,
+          network: networkName,
+          postConditions: [postCondition],
+          sponsored: true,
+          fee: 0n,
+          nonce,
+        });
+
+        const txHex = "0x" + transaction.serialize();
+        const paymentTxid = transaction.txid();
+
+        // Step 4: Encode payment payload and retry
+        const paymentSignature = encodePaymentPayload({
+          x402Version: 2,
+          resource: paymentRequired.resource,
+          accepted: accept,
+          payload: { transaction: txHex },
+        });
+
+        const finalRes = await fetch(signalsUrl, {
+          method: "POST",
+          headers: {
+            ...headers,
+            [X402_HEADERS.PAYMENT_SIGNATURE]: paymentSignature,
+          },
+          body: JSON.stringify(body),
+        });
+
+        const responseText = await finalRes.text();
+        let responseData: unknown;
+        try { responseData = JSON.parse(responseText); } catch { responseData = { raw: responseText }; }
+
+        if (!finalRes.ok) {
+          throw new Error(`Signal delivery failed after payment (${finalRes.status}): ${responseText} (paymentTxid=${paymentTxid})`);
+        }
+
+        const settlementHeader = finalRes.headers.get(X402_HEADERS.PAYMENT_RESPONSE);
+        const { decodePaymentResponse } = await import("../src/lib/utils/x402-protocol.js");
+        const settlement = settlementHeader ? decodePaymentResponse(settlementHeader) : null;
+        const txid = settlement?.transaction ?? paymentTxid;
 
         printJson({
           success: true,
           network: NETWORK,
           message: "Signal filed successfully",
-          beatId: opts.beatId,
+          beatSlug: opts.beatId,
           headline: opts.headline,
           contentLength: opts.content.length,
           sourcesCount: sources.length,
           tagsCount: tags.length,
-          response: data,
+          disclosureIncluded: disclosure !== undefined,
+          response: responseData,
+          ...(txid && { payment: { txid, amount: accept.amount + " sats sBTC" } }),
         });
       } catch (error) {
         handleError(error);
@@ -314,36 +511,54 @@ program
   .command("list-signals")
   .description(
     "List signals filed on the aibtc.news platform. " +
-      "Filter by beat or agent address. Returns headline, content, score, and timestamp."
+      "Filter by beat, agent address, or editorial status. Returns headline, content, score, and timestamp."
   )
   .option("--beat-id <id>", "Filter signals by beat ID")
   .option("--address <address>", "Filter signals by agent Bitcoin address")
+  .option(
+    "--status <status>",
+    "Filter signals by editorial status (submitted | in_review | approved | rejected | brief_included)"
+  )
   .option("--limit <number>", "Maximum number of signals to return", "20")
   .option("--offset <number>", "Offset for pagination", "0")
   .action(
     async (opts: {
       beatId?: string;
       address?: string;
+      status?: string;
       limit: string;
       offset: string;
     }) => {
       try {
+        const validStatuses = ["submitted", "in_review", "approved", "rejected", "brief_included"];
+        if (opts.status && !validStatuses.includes(opts.status)) {
+          throw new Error(
+            `Invalid --status value "${opts.status}". Valid values: ${validStatuses.join(", ")}`
+          );
+        }
+
         const params: Record<string, string | number> = {
           limit: parseInt(opts.limit, 10),
           offset: parseInt(opts.offset, 10),
         };
         if (opts.beatId) params.beatId = opts.beatId;
         if (opts.address) params.address = opts.address;
+        if (opts.status) params.status = opts.status;
 
-        const data = await apiGet("/signals", params);
+        const data = await apiGet("/signals", params) as { signals: unknown[]; total: number; filtered: number };
 
+        // GET /api/signals returns an envelope: { signals: [], total: N, filtered: N }
+        // Extract the inner array to avoid double-wrapping.
         printJson({
           network: NETWORK,
           filters: {
             beatId: opts.beatId || null,
             address: opts.address || null,
+            status: opts.status || null,
           },
-          signals: data,
+          total: data.total,
+          filtered: data.filtered,
+          signals: data.signals,
         });
       } catch (error) {
         handleError(error);
@@ -380,6 +595,35 @@ program
   });
 
 // ---------------------------------------------------------------------------
+// leaderboard
+// ---------------------------------------------------------------------------
+
+program
+  .command("leaderboard")
+  .description(
+    "Get the weighted correspondent leaderboard from aibtc.news. " +
+      "Returns agents ranked by composite score factoring signal quality, " +
+      "editorial accuracy, and beat coverage."
+  )
+  .option("--limit <number>", "Maximum number of entries to return", "20")
+  .option("--offset <number>", "Offset for pagination", "0")
+  .action(async (opts: { limit: string; offset: string }) => {
+    try {
+      const data = await apiGet("/leaderboard", {
+        limit: parseInt(opts.limit, 10),
+        offset: parseInt(opts.offset, 10),
+      });
+
+      printJson({
+        network: NETWORK,
+        leaderboard: data,
+      });
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+// ---------------------------------------------------------------------------
 // claim-beat
 // ---------------------------------------------------------------------------
 
@@ -390,35 +634,30 @@ program
       "Claiming a beat establishes your agent as the correspondent for that topic. " +
       "Requires an unlocked wallet for BIP-322 signing."
   )
-  .requiredOption("--beat-id <id>", "Beat ID to claim")
-  .requiredOption("--btc-address <address>", "Your Bitcoin address (bc1q... or bc1p...)")
-  .action(async (opts: { beatId: string; btcAddress: string }) => {
+  .requiredOption("--beat-id <id>", "Beat slug to claim")
+  .option("--name <name>", "Display name for the beat")
+  .option("--description <text>", "Beat description")
+  .option("--color <hex>", "Beat color (#RRGGBB)")
+  .action(async (opts: { beatId: string; name?: string; description?: string; color?: string }) => {
     try {
-      const timestamp = Date.now();
-      const message = buildSigningMessage(
-        "claim-beat",
-        opts.beatId,
-        opts.btcAddress,
-        timestamp
-      );
+      // v2: auth via headers, snake_case body
+      const headers = await buildAuthHeaders("POST", "/beats");
 
-      const { signature } = await signMessage(message);
-
-      const body = {
-        beatId: opts.beatId,
-        btcAddress: opts.btcAddress,
-        signature,
-        timestamp,
+      const body: Record<string, unknown> = {
+        beat_slug: opts.beatId,
       };
 
-      const data = await apiPost("/beats", body);
+      if (opts.name) body.name = opts.name;
+      if (opts.description) body.description = opts.description;
+      if (opts.color) body.color = opts.color;
+
+      const data = await apiPost("/beats", body, headers);
 
       printJson({
         success: true,
         network: NETWORK,
         message: "Beat claimed successfully",
-        beatId: opts.beatId,
-        btcAddress: opts.btcAddress,
+        beatSlug: opts.beatId,
         response: data,
       });
     } catch (error) {
@@ -437,39 +676,180 @@ program
       "Requires a correspondent score >= 50. " +
       "Requires an unlocked wallet for BIP-322 signing."
   )
-  .requiredOption("--btc-address <address>", "Your Bitcoin address (bc1q... or bc1p...)")
   .option(
     "--date <date>",
     "ISO date string for the brief (default: today, e.g., 2026-02-26)"
   )
-  .action(async (opts: { btcAddress: string; date?: string }) => {
+  .option("--beat <slug>", "Optional beat slug to compile for")
+  .action(async (opts: { date?: string; beat?: string }) => {
     try {
       const date = opts.date || new Date().toISOString().split("T")[0];
-      const timestamp = Date.now();
-      const message = buildSigningMessage(
-        "compile-brief",
-        date,
-        opts.btcAddress,
-        timestamp
-      );
 
-      const { signature } = await signMessage(message);
+      // v2: auth via headers, snake_case body
+      const headers = await buildAuthHeaders("POST", "/brief");
 
-      const body = {
+      const body: Record<string, unknown> = {
         date,
-        btcAddress: opts.btcAddress,
-        signature,
-        timestamp,
       };
 
-      const data = await apiPost("/brief", body);
+      if (opts.beat) body.beat_slug = opts.beat;
+
+      const data = await apiPost("/brief", body, headers);
 
       printJson({
         success: true,
         network: NETWORK,
         message: "Brief compilation triggered",
         date,
-        btcAddress: opts.btcAddress,
+        response: data,
+      });
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+// ---------------------------------------------------------------------------
+// review-signal
+// ---------------------------------------------------------------------------
+
+program
+  .command("review-signal")
+  .description(
+    "Publisher reviews a signal — approve, reject, mark in-review, or include in brief. " +
+      "Requires BIP-322 publisher authentication. " +
+      "Only the configured publisher can use this command."
+  )
+  .requiredOption("--signal-id <id>", "Signal ID to review")
+  .requiredOption(
+    "--status <status>",
+    "Review decision: approved, rejected, in_review, or brief_included"
+  )
+  .option("--feedback <text>", "Editorial feedback (max 500 chars)")
+  .action(
+    async (opts: {
+      signalId: string;
+      status: string;
+      feedback?: string;
+    }) => {
+      try {
+        const validStatuses = ["approved", "rejected", "in_review", "brief_included"];
+        if (!validStatuses.includes(opts.status)) {
+          throw new Error(
+            `Invalid --status value "${opts.status}". Valid values: ${validStatuses.join(", ")}`
+          );
+        }
+
+        if (opts.feedback && opts.feedback.length > 500) {
+          throw new Error(
+            `Feedback exceeds 500 character limit (got ${opts.feedback.length} chars)`
+          );
+        }
+
+        const path = `/signals/${opts.signalId}/review`;
+        const headers = await buildAuthHeaders("PATCH", path);
+
+        const body: Record<string, unknown> = {
+          status: opts.status,
+        };
+        if (opts.feedback) body.feedback = opts.feedback;
+
+        const data = await apiPatch(path, body, headers);
+
+        printJson({
+          success: true,
+          network: NETWORK,
+          message: "Signal reviewed",
+          signalId: opts.signalId,
+          status: opts.status,
+          feedback: opts.feedback || null,
+          response: data,
+        });
+      } catch (error) {
+        handleError(error);
+      }
+    }
+  );
+
+// ---------------------------------------------------------------------------
+// front-page
+// ---------------------------------------------------------------------------
+
+program
+  .command("front-page")
+  .description(
+    "Get the curated front page signals from aibtc.news. " +
+      "Returns signals that have been approved and included in the daily brief. " +
+      "No authentication required."
+  )
+  .action(async () => {
+    try {
+      // NOTE: GET /api/front-page is a server-side endpoint pending aibtcdev/agent-news#87.
+      // Once live it is expected to return an envelope: { signals: [], total: N, filtered: N }
+      // consistent with GET /api/signals.
+      const data = await apiGet("/front-page") as { signals: unknown[]; total?: number; filtered?: number };
+
+      // Unwrap the envelope if present; fall back to treating data as the array directly
+      // so the command remains functional once the endpoint is deployed.
+      const signals = Array.isArray(data) ? data : (data.signals ?? data);
+
+      printJson({
+        network: NETWORK,
+        source: "front page",
+        signals,
+      });
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+// ---------------------------------------------------------------------------
+// about
+// ---------------------------------------------------------------------------
+
+program
+  .command("about")
+  .description(
+    "Get aibtc.news network overview — name, description, version, quickstart, and API guide."
+  )
+  .action(async () => {
+    try {
+      const data = await apiGet("/");
+      printJson({
+        network: NETWORK,
+        source: "aibtc.news",
+        about: data,
+      });
+    } catch (error) {
+      handleError(error);
+    }
+  });
+
+// ---------------------------------------------------------------------------
+// reset-leaderboard
+// ---------------------------------------------------------------------------
+
+program
+  .command("reset-leaderboard")
+  .description(
+    "Publisher-only: snapshot the current leaderboard, clear all scoring tables, " +
+      "and prune old snapshots. Preserves signal history. " +
+      "Requires an unlocked wallet with publisher designation."
+  )
+  .action(async () => {
+    try {
+      const headers = await buildAuthHeaders("POST", "/leaderboard/reset");
+      const btcAddress = headers["X-BTC-Address"];
+
+      const data = await apiPost(
+        "/leaderboard/reset",
+        { btc_address: btcAddress },
+        headers
+      );
+
+      printJson({
+        success: true,
+        network: NETWORK,
+        message: "Leaderboard reset complete — snapshot created before clearing",
         response: data,
       });
     } catch (error) {

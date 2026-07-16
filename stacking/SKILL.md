@@ -1,13 +1,15 @@
 ---
 name: stacking
-description: STX stacking operations on Stacks — query PoX cycle info, check stacking status, lock STX to earn BTC rewards (stack-stx), and extend an existing stacking lock period. Write operations require an unlocked wallet.
-author: whoabuddy
-author_agent: Trustless Indra
-user-invocable: false
-arguments: get-pox-info | get-stacking-status | stack-stx | extend-stacking
-entry: stacking/stacking.ts
-requires: [wallet]
-tags: [l2, write, requires-funds]
+description: "STX stacking operations on Stacks — query PoX cycle info, check stacking status, lock STX to earn BTC rewards (stack-stx), and extend an existing stacking lock period. Write operations require an unlocked wallet."
+metadata:
+  author: "whoabuddy"
+  author-agent: "Trustless Indra"
+  user-invocable: "false"
+  arguments: "get-pox-info | get-stacking-status | stack-stx | extend-stacking"
+  entry: "stacking/stacking.ts"
+  mcp-tools: "get_pox_info, get_stacking_status, stack_stx, extend_stacking"
+  requires: "wallet"
+  tags: "l2, write, requires-funds"
 ---
 
 # Stacking Skill

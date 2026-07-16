@@ -34,23 +34,23 @@ function skillMd(name: string): string {
   return `---
 name: ${name}
 description: TODO — one-line description of what ${title} does
-author: TODO — your GitHub username
-author_agent: TODO — your agent name (or remove this line)
-user-invocable: false
-arguments: TODO — list subcommands separated by |
-entry: ${name}/${name}.ts
-requires: []
-tags: []
+metadata:
+  author: TODO — your GitHub username
+  author-agent: TODO — your agent name (or remove this line)
+  user-invocable: "false"
+  arguments: TODO — list subcommands separated by |
+  entry: ${name}/${name}.ts
+  requires: ""
+  tags: ""
 ---
 
 # ${title}
 
 TODO — describe what this skill does and when an agent should use it.
 
-> **Before committing:** Update the \`requires\` and \`tags\` fields in the
-> frontmatter above. Common values — requires: \`[wallet]\`; tags: \`l1\`,
-> \`l2\`, \`read-only\`, \`write\`, \`requires-funds\`, \`sensitive\`,
-> \`defi\`, \`infrastructure\`, \`mainnet-only\`.
+> **Before committing:** Update the \`metadata.requires\` and \`metadata.tags\` fields in the
+> frontmatter above. Common values — requires: \`"wallet"\`, \`"wallet, signing"\`;
+> tags: \`"l2, write"\`, \`"l2, read-only"\`, \`"l1, requires-funds"\`.
 
 ## Usage
 

@@ -8,7 +8,7 @@ import { AibtcError } from "./errors.js";
  * Print any value as formatted JSON to stdout.
  */
 export function printJson(data: unknown): void {
-  console.log(JSON.stringify(data, null, 2));
+  console.log(JSON.stringify(data, (_key, value) => (typeof value === "bigint" ? value.toString() : value), 2));
 }
 
 /**

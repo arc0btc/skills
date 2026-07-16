@@ -125,17 +125,15 @@ program
     try {
       const walletManager = getWalletManager();
 
-      let targetWalletId = opts.walletId;
+      const targetWalletId =
+        opts.walletId ?? (await walletManager.getActiveWalletId());
       if (!targetWalletId) {
-        const activeId = await walletManager.getActiveWalletId();
-        if (!activeId) {
-          handleError(
-            new Error(
-              "No active wallet found. Use wallet_create or wallet_import first, or specify --wallet-id."
-            )
-          );
-        }
-        targetWalletId = activeId!;
+        handleError(
+          new Error(
+            "No active wallet found. Create or import a wallet first, or specify --wallet-id."
+          )
+        );
+        return;
       }
 
       const account = await walletManager.unlock(targetWalletId, opts.password);
@@ -313,13 +311,11 @@ program
 
       const walletManager = getWalletManager();
 
-      let targetWalletId = opts.walletId;
+      const targetWalletId =
+        opts.walletId ?? (await walletManager.getActiveWalletId());
       if (!targetWalletId) {
-        const activeId = await walletManager.getActiveWalletId();
-        if (!activeId) {
-          handleError(new Error("No active wallet found. Specify --wallet-id."));
-        }
-        targetWalletId = activeId!;
+        handleError(new Error("No active wallet found. Specify --wallet-id."));
+        return;
       }
 
       const mnemonic = await walletManager.exportMnemonic(targetWalletId, opts.password);
@@ -359,15 +355,11 @@ program
       try {
         const walletManager = getWalletManager();
 
-        let targetWalletId = opts.walletId;
+        const targetWalletId =
+          opts.walletId ?? (await walletManager.getActiveWalletId());
         if (!targetWalletId) {
-          const activeId = await walletManager.getActiveWalletId();
-          if (!activeId) {
-            handleError(
-              new Error("No active wallet found. Specify --wallet-id.")
-            );
-          }
-          targetWalletId = activeId!;
+          handleError(new Error("No active wallet found. Specify --wallet-id."));
+          return;
         }
 
         await walletManager.rotatePassword(

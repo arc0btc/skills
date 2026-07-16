@@ -4,10 +4,14 @@
  * Nostr protocol operations for AI agents — post notes, read feeds,
  * search by hashtags, manage profiles, and derive keys.
  *
- * Key derivation (BTC-shared): BIP84 m/84'/0'/0'/0/0 → secp256k1 privkey → x-only pubkey
- * Same keypair as BTC wallet (npub ↔ taproot address share the same key).
- * NOTE: This is NOT NIP-06 (which uses m/44'/1237'/0'/0/0). We intentionally
- * reuse the BTC key so the agent has a single identity across both protocols.
+ * Key derivation (default — NIP-06): m/44'/1237'/0'/0/0 → secp256k1 privkey → x-only pubkey
+ * This is the standard NIP-06 path used by Alby, Damus, Amethyst, and other Nostr clients.
+ * The same mnemonic produces the same npub in any NIP-06-compatible application.
+ *
+ * Override with --key-source:
+ *   --key-source nip06    (default) BIP-39 mnemonic → m/44'/1237'/0'/0/0
+ *   --key-source taproot  BIP-39 mnemonic → m/86'/0'/0'/0/0 (same key as bc1p address)
+ *   --key-source stacks   BIP-39 mnemonic → m/84'/0'/0'/0/0 (backward-compat BTC segwit path)
  *
  * Usage: bun run nostr/nostr.ts <subcommand> [options]
  */
@@ -34,26 +38,38 @@ const DEFAULT_RELAYS = ["wss://relay.damus.io", "wss://nos.lol"];
 
 const WS_TIMEOUT_MS = 10_000;
 
+/** NIP-06 standard derivation path for Nostr keys */
+const NIP06_DERIVATION_PATH = "m/44'/1237'/0'/0/0";
+
+/** BIP-86 Taproot derivation path (bc1p... address) */
+const TAPROOT_DERIVATION_PATH = "m/86'/coin_type'/0'/0/0";
+
+/** BIP-84 SegWit derivation path (bc1q... address, backward-compat) */
+const SEGWIT_DERIVATION_PATH = "m/84'/coin_type'/0'/0/0";
+
+/** Supported key source values for --key-source flag */
+type KeySource = "nip06" | "taproot" | "stacks";
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Key Derivation (BTC-shared)
+ * Derive Nostr keys from the active wallet account.
  *
- * BIP39 mnemonic → BIP32 seed → m/84'/0'/0'/0/0 → 32-byte secp256k1 private key
+ * Respects the --key-source flag:
+ *   nip06    (default) — account.nostrPrivateKey derived at m/44'/1237'/0'/0/0
+ *   taproot  — account.taprootPrivateKey derived at m/86'/0'/0'/0/0 (x-only, same as bc1p key)
+ *   stacks   — account.btcPrivateKey derived at m/84'/0'/0'/0/0 (backward-compat)
  *
- * The private key is used directly as the Nostr secret key (sk).
- * The x-only public key (32 bytes) is the Nostr pubkey.
- *
- * This is the same key used for the BTC taproot address, so:
- *   npub ↔ BTC address share the same underlying keypair.
- *
- * NOTE: This is NOT NIP-06 derivation (which uses m/44'/1237'/0'/0/0).
- * The BTC path is intentional — agents get a shared identity across
- * Bitcoin and Nostr from a single mnemonic.
+ * All three key types are pre-derived during wallet unlock and stored on the Account object.
  */
-function deriveNostrKeys(): { sk: Uint8Array; pubkey: string; npub: string } {
+function deriveNostrKeys(keySource: KeySource = "nip06"): {
+  sk: Uint8Array;
+  pubkey: string;
+  npub: string;
+  derivationPath: string;
+} {
   const walletManager = getWalletManager();
   const account = walletManager.getActiveAccount();
   if (!account) {
@@ -62,13 +78,34 @@ function deriveNostrKeys(): { sk: Uint8Array; pubkey: string; npub: string } {
     );
   }
 
-  // The BIP84 derivation at m/84'/0'/0'/0/0 gives us a secp256k1 private key.
-  // We use the raw 32-byte private key as the Nostr secret key.
-  const sk = account.privateKey; // Uint8Array (32 bytes)
+  let sk: Uint8Array;
+  let derivationPath: string;
+
+  if (keySource === "taproot") {
+    if (!account.taprootPrivateKey) {
+      throw new Error("Taproot private key not available in current session");
+    }
+    sk = account.taprootPrivateKey;
+    derivationPath = TAPROOT_DERIVATION_PATH.replace("coin_type", account.network === "mainnet" ? "0" : "1");
+  } else if (keySource === "stacks") {
+    if (!account.btcPrivateKey) {
+      throw new Error("BTC segwit private key not available in current session");
+    }
+    sk = account.btcPrivateKey;
+    derivationPath = SEGWIT_DERIVATION_PATH.replace("coin_type", account.network === "mainnet" ? "0" : "1");
+  } else {
+    // nip06 (default)
+    if (!account.nostrPrivateKey) {
+      throw new Error("NIP-06 Nostr private key not available in current session");
+    }
+    sk = account.nostrPrivateKey;
+    derivationPath = NIP06_DERIVATION_PATH;
+  }
+
   const pubkey = getPublicKey(sk); // hex string (x-only, 32 bytes)
   const npub = nip19.npubEncode(pubkey);
 
-  return { sk, pubkey, npub };
+  return { sk, pubkey, npub, derivationPath };
 }
 
 /**
@@ -181,9 +218,14 @@ program
   .name("nostr")
   .description(
     "Nostr protocol operations — post notes, read feeds, search by hashtag tags, " +
-      "get/set profiles, derive keys (BTC-shared path), and manage relay connections."
+      "get/set profiles, derive keys (NIP-06 default), and manage relay connections."
   )
-  .version("0.1.0");
+  .version("0.2.0")
+  .option(
+    "--key-source <source>",
+    "Key derivation source: nip06 (default, m/44'/1237'/0'/0/0), taproot (m/86'/0'/0'/0/0), stacks (m/84'/0'/0'/0/0)",
+    "nip06"
+  );
 
 // ---------------------------------------------------------------------------
 // post
@@ -194,9 +236,10 @@ program
   .description("Post a kind:1 note to configured relays. Requires unlocked wallet.")
   .requiredOption("--content <text>", "Note content")
   .option("--tags <hashtags>", "Comma-separated hashtags (e.g. Bitcoin,sBTC)")
-  .action(async (opts) => {
+  .action(async (opts: { content: string; tags?: string }) => {
     try {
-      const { sk, pubkey } = deriveNostrKeys();
+      const keySource = program.opts().keySource as KeySource;
+      const { sk, pubkey } = deriveNostrKeys(keySource);
 
       const tags: string[][] = [];
       if (opts.tags) {
@@ -239,7 +282,7 @@ program
   .option("--pubkey <hex-or-npub>", "Filter by author pubkey")
   .option("--limit <n>", "Max notes to fetch", "20")
   .option("--relay <url>", "Override relay URL")
-  .action(async (opts) => {
+  .action(async (opts: { pubkey?: string; limit: string; relay?: string }) => {
     try {
       const pool = createPool();
       const relays = opts.relay ? [opts.relay] : DEFAULT_RELAYS;
@@ -283,7 +326,7 @@ program
   .requiredOption("--tags <hashtags>", "Comma-separated hashtags to search")
   .option("--limit <n>", "Max notes to fetch", "20")
   .option("--relay <url>", "Override relay URL")
-  .action(async (opts) => {
+  .action(async (opts: { tags: string; limit: string; relay?: string }) => {
     try {
       const pool = createPool();
       const relays = opts.relay ? [opts.relay] : DEFAULT_RELAYS;
@@ -322,7 +365,7 @@ program
   .command("get-profile")
   .description("Get a user's kind:0 profile metadata.")
   .requiredOption("--pubkey <hex-or-npub>", "User pubkey (hex or npub)")
-  .action(async (opts) => {
+  .action(async (opts: { pubkey: string }) => {
     try {
       const pool = createPool();
       const relays = DEFAULT_RELAYS;
@@ -362,58 +405,67 @@ program
   .option("--picture <url>", "Profile picture URL")
   .option("--nip05 <nip05>", "NIP-05 identifier (e.g. user@domain.com)")
   .option("--lud16 <lud16>", "Lightning address (e.g. user@getalby.com)")
-  .action(async (opts) => {
-    try {
-      const { sk, pubkey } = deriveNostrKeys();
-
-      // Fetch existing profile to merge (kind:0 is replaceable — publishing
-      // a new event wipes fields not included). This prevents set-profile
-      // --name "foo" from deleting about, picture, etc.
-      const pool = createPool();
-      const relays = DEFAULT_RELAYS;
-      let existing: Record<string, string> = {};
+  .action(
+    async (opts: {
+      name?: string;
+      about?: string;
+      picture?: string;
+      nip05?: string;
+      lud16?: string;
+    }) => {
       try {
-        const profileEvents = await queryRelays(pool, relays, {
-          kinds: [0],
-          authors: [pubkey],
-          limit: 1,
-        });
-        if (profileEvents.length > 0) {
-          existing = JSON.parse(profileEvents[0].content);
+        const keySource = program.opts().keySource as KeySource;
+        const { sk, pubkey } = deriveNostrKeys(keySource);
+
+        // Fetch existing profile to merge (kind:0 is replaceable — publishing
+        // a new event wipes fields not included). This prevents set-profile
+        // --name "foo" from deleting about, picture, etc.
+        const pool = createPool();
+        const relays = DEFAULT_RELAYS;
+        let existing: Record<string, string> = {};
+        try {
+          const profileEvents = await queryRelays(pool, relays, {
+            kinds: [0],
+            authors: [pubkey],
+            limit: 1,
+          });
+          if (profileEvents.length > 0) {
+            existing = JSON.parse(profileEvents[0].content);
+          }
+        } catch {
+          // If fetch fails, proceed with empty — user's new fields will still apply
         }
-      } catch {
-        // If fetch fails, proceed with empty — user's new fields will still apply
+
+        const content: Record<string, string> = { ...existing };
+        if (opts.name) content.name = opts.name;
+        if (opts.about) content.about = opts.about;
+        if (opts.picture) content.picture = opts.picture;
+        if (opts.nip05) content.nip05 = opts.nip05;
+        if (opts.lud16) content.lud16 = opts.lud16;
+
+        const template: EventTemplate = {
+          kind: 0,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [],
+          content: JSON.stringify(content),
+        };
+
+        const event = finalizeEvent(template, sk);
+        const results = await publishToRelays(pool, event, relays);
+
+        pool.close(relays);
+        printJson({
+          success: true,
+          eventId: event.id,
+          pubkey,
+          profile: content,
+          relays: results,
+        });
+      } catch (err) {
+        handleError(err);
       }
-
-      const content: Record<string, string> = { ...existing };
-      if (opts.name) content.name = opts.name;
-      if (opts.about) content.about = opts.about;
-      if (opts.picture) content.picture = opts.picture;
-      if (opts.nip05) content.nip05 = opts.nip05;
-      if (opts.lud16) content.lud16 = opts.lud16;
-
-      const template: EventTemplate = {
-        kind: 0,
-        created_at: Math.floor(Date.now() / 1000),
-        tags: [],
-        content: JSON.stringify(content),
-      };
-
-      const event = finalizeEvent(template, sk);
-      const results = await publishToRelays(pool, event, relays);
-
-      pool.close(relays);
-      printJson({
-        success: true,
-        eventId: event.id,
-        pubkey,
-        profile: content,
-        relays: results,
-      });
-    } catch (err) {
-      handleError(err);
     }
-  });
+  );
 
 // ---------------------------------------------------------------------------
 // get-pubkey
@@ -422,17 +474,24 @@ program
 program
   .command("get-pubkey")
   .description(
-    "Derive and display your Nostr public key from the BIP84 wallet (BTC-shared key). " +
-      "Requires unlocked wallet."
+    "Derive and display your Nostr public key. Defaults to NIP-06 (m/44'/1237'/0'/0/0). " +
+      "Use --key-source to select a different derivation path. Requires unlocked wallet."
   )
   .action(async () => {
     try {
-      const { pubkey, npub } = deriveNostrKeys();
+      const keySource = program.opts().keySource as KeySource;
+      const { pubkey, npub, derivationPath } = deriveNostrKeys(keySource);
       printJson({
         npub,
         hex: pubkey,
-        derivationPath: "m/84'/0'/0'/0/0",
-        note: "Same secp256k1 key as BTC wallet. x-only pubkey used for Nostr identity.",
+        keySource,
+        derivationPath,
+        note:
+          keySource === "nip06"
+            ? "NIP-06 standard path — compatible with Alby, Damus, Amethyst, and other Nostr clients."
+            : keySource === "taproot"
+            ? "Taproot x-only key — same keypair as bc1p address; externally verifiable from taproot address."
+            : "BTC SegWit path (m/84') — backward-compatible with original nostr skill (pre NIP-06 update).",
       });
     } catch (err) {
       handleError(err);
@@ -465,11 +524,12 @@ program
   .requiredOption("--signal-id <id>", "Signal ID from aibtc.news")
   .option("--beat <name>", "Beat name for context (e.g. 'BTC Macro')")
   .option("--relays <urls>", "Comma-separated relay URLs (overrides defaults)")
-  .action(async (opts) => {
+  .action(async (opts: { signalId: string; beat?: string; relays?: string }) => {
     try {
-      const { sk, pubkey } = deriveNostrKeys();
+      const keySource = program.opts().keySource as KeySource;
+      const { sk, pubkey } = deriveNostrKeys(keySource);
       const relays = opts.relays
-        ? (opts.relays as string).split(",").map((r: string) => r.trim())
+        ? opts.relays.split(",").map((r: string) => r.trim())
         : DEFAULT_RELAYS;
 
       // Fetch signal from aibtc.news API
@@ -525,41 +585,49 @@ program
   .option("--beat <name>", "Beat name", "BTC Macro")
   .option("--signal-id <id>", "Signal ID for reference link")
   .option("--relays <urls>", "Comma-separated relay URLs (overrides defaults)")
-  .action(async (opts) => {
-    try {
-      const { sk, pubkey } = deriveNostrKeys();
-      const relays = opts.relays
-        ? (opts.relays as string).split(",").map((r: string) => r.trim())
-        : DEFAULT_RELAYS;
+  .action(
+    async (opts: {
+      content: string;
+      beat: string;
+      signalId?: string;
+      relays?: string;
+    }) => {
+      try {
+        const keySource = program.opts().keySource as KeySource;
+        const { sk, pubkey } = deriveNostrKeys(keySource);
+        const relays = opts.relays
+          ? opts.relays.split(",").map((r: string) => r.trim())
+          : DEFAULT_RELAYS;
 
-      const { content: noteContent, tags } = formatSignalNote({
-        beat: opts.beat,
-        content: opts.content,
-        signalId: opts.signalId,
-      });
+        const { content: noteContent, tags } = formatSignalNote({
+          beat: opts.beat,
+          content: opts.content,
+          signalId: opts.signalId,
+        });
 
-      const template: EventTemplate = {
-        kind: 1,
-        created_at: Math.floor(Date.now() / 1000),
-        tags,
-        content: noteContent,
-      };
+        const template: EventTemplate = {
+          kind: 1,
+          created_at: Math.floor(Date.now() / 1000),
+          tags,
+          content: noteContent,
+        };
 
-      const event = finalizeEvent(template, sk);
-      const pool = createPool();
-      const results = await publishToRelays(pool, event, relays);
-      pool.close(relays);
+        const event = finalizeEvent(template, sk);
+        const pool = createPool();
+        const results = await publishToRelays(pool, event, relays);
+        pool.close(relays);
 
-      printJson({
-        success: true,
-        eventId: event.id,
-        pubkey,
-        relays: results,
-      });
-    } catch (err) {
-      handleError(err);
+        printJson({
+          success: true,
+          eventId: event.id,
+          pubkey,
+          relays: results,
+        });
+      } catch (err) {
+        handleError(err);
+      }
     }
-  });
+  );
 
 // ---------------------------------------------------------------------------
 

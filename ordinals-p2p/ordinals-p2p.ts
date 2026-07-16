@@ -386,7 +386,12 @@ program
       let addr = opts.address;
       if (!addr) {
         try {
-          addr = getSignedAccount().btcAddress!;
+          const account = getSignedAccount();
+          if (!account.btcAddress) {
+            handleError(new Error("Bitcoin address not available. Unlock your wallet or provide --address."));
+            return;
+          }
+          addr = account.btcAddress;
         } catch {
           handleError(new Error("Provide --address <btcAddr> or unlock your wallet first."));
           return;

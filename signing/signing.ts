@@ -1138,11 +1138,11 @@ program
   )
   .option(
     "--wallet-password <password>",
-    "Wallet password (less secure: visible in process args)"
+    "Wallet password to auto-unlock before signing (sensitive)"
   )
   .option(
     "--wallet-password-env <envVar>",
-    "Environment variable name containing wallet password",
+    "Environment variable name containing wallet password (preferred over --wallet-password)",
     "AIBTC_WALLET_PASSWORD"
   )
   .action(
@@ -1290,11 +1290,11 @@ program
   )
   .option(
     "--wallet-password <password>",
-    "Wallet password (less secure: visible in process args)"
+    "Wallet password to auto-unlock before signing (sensitive)"
   )
   .option(
     "--wallet-password-env <envVar>",
-    "Environment variable name containing wallet password",
+    "Environment variable name containing wallet password (preferred over --wallet-password)",
     "AIBTC_WALLET_PASSWORD"
   )
   .action(

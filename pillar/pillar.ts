@@ -13,6 +13,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { getPillarApi } from "../src/lib/services/pillar-api.service.js";
+import { getHiroApi } from "../src/lib/services/hiro-api.js";
 import { NETWORK, getExplorerTxUrl } from "../src/lib/config/networks.js";
 import { printJson, handleError } from "../src/lib/utils/cli.js";
 
@@ -758,33 +759,28 @@ program
 
       const walletAddress = session.walletAddress;
 
-      // Fetch balances from Hiro API
+      // Fetch balances from Hiro API using shared service
       let sbtcBalance = 0;
       let zsbtcBalance = 0;
 
       try {
-        const balanceRes = await fetch(
-          `https://api.hiro.so/extended/v1/address/${walletAddress}/balances`
+        const hiro = getHiroApi(NETWORK);
+        const balanceData = await hiro.getAccountBalances(walletAddress) as {
+          fungible_tokens?: Record<string, { balance: string }>;
+        };
+
+        const sbtcKey = Object.keys(balanceData.fungible_tokens || {}).find((k) =>
+          k.includes("sbtc-token")
         );
+        if (sbtcKey && balanceData.fungible_tokens) {
+          sbtcBalance = parseInt(balanceData.fungible_tokens[sbtcKey].balance) || 0;
+        }
 
-        if (balanceRes.ok) {
-          const balanceData = (await balanceRes.json()) as {
-            fungible_tokens?: Record<string, { balance: string }>;
-          };
-
-          const sbtcKey = Object.keys(balanceData.fungible_tokens || {}).find((k) =>
-            k.includes("sbtc-token")
-          );
-          if (sbtcKey && balanceData.fungible_tokens) {
-            sbtcBalance = parseInt(balanceData.fungible_tokens[sbtcKey].balance) || 0;
-          }
-
-          const zsbtcKey = Object.keys(balanceData.fungible_tokens || {}).find((k) =>
-            k.includes("zsbtc")
-          );
-          if (zsbtcKey && balanceData.fungible_tokens) {
-            zsbtcBalance = parseInt(balanceData.fungible_tokens[zsbtcKey].balance) || 0;
-          }
+        const zsbtcKey = Object.keys(balanceData.fungible_tokens || {}).find((k) =>
+          k.includes("zsbtc")
+        );
+        if (zsbtcKey && balanceData.fungible_tokens) {
+          zsbtcBalance = parseInt(balanceData.fungible_tokens[zsbtcKey].balance) || 0;
         }
       } catch {
         // Continue without balance data

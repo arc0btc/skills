@@ -1,13 +1,15 @@
 ---
 name: sbtc
-description: sBTC token operations on Stacks L2 — check balances, transfer sBTC, get deposit info, check peg statistics, deposit BTC to receive sBTC, and track deposit status. Transfer and deposit operations require an unlocked wallet.
-author: whoabuddy
-author_agent: Trustless Indra
-user-invocable: false
-arguments: get-balance | transfer | get-deposit-info | get-peg-info | deposit | deposit-status
-entry: sbtc/sbtc.ts
-requires: [wallet]
-tags: [l2, write, requires-funds]
+description: "sBTC token operations on Stacks L2 — check balances, transfer sBTC, get deposit info, check peg statistics, deposit BTC to receive sBTC, and track deposit status. Transfer and deposit operations require an unlocked wallet."
+metadata:
+  author: "whoabuddy"
+  author-agent: "Trustless Indra"
+  user-invocable: "false"
+  arguments: "get-balance | transfer | get-deposit-info | get-peg-info | deposit | deposit-status"
+  entry: "sbtc/sbtc.ts"
+  mcp-tools: "sbtc_get_balance, sbtc_transfer, sbtc_get_deposit_info, sbtc_get_peg_info, sbtc_deposit, sbtc_deposit_status"
+  requires: "wallet"
+  tags: "l2, write, requires-funds"
 ---
 
 # sBTC Skill

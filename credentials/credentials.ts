@@ -176,4 +176,4 @@ program
 // Parse
 // ---------------------------------------------------------------------------
 
-program.parseAsync(process.argv);
+program.parse(process.argv);

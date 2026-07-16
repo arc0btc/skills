@@ -239,17 +239,32 @@ async function readAlexPosition(
     if (res.okay) {
       const balX = decodeTupleField(res.result, "balance-x") ?? 0n;
       const balY = decodeTupleField(res.result, "balance-y") ?? 0n;
+      // total-supply is in the get-pool-details tuple (uint128 in ALEX fixed-point, ALEX_FACTOR = 1e8)
+      const totalSupply = decodeTupleField(res.result, "total-supply") ?? 0n;
       pos.details.poolBalanceX = balX.toString();
+      // balance-y is uint128 in ALEX fixed-point (ALEX_FACTOR = 100_000_000).
+      // For aBTC with 8 decimal places: balY / ALEX_FACTOR * 1e8 = balY (numerically equal to sats).
       pos.details.poolBalanceY = balY.toString();
+      pos.details.poolTotalSupply = totalSupply.toString();
       // ALEX typical LP APY estimate from fee revenue
       pos.apyPct = 3.5;
       pos.details.apySource = "static estimate, not live";
+
+      // ALEX AMM v2 tracks LP positions internally — there is no separate LP
+      // token contract exposing ft-get-balance per user. The reduce-position
+      // function takes a `percent` argument rather than a token amount, so
+      // user shares cannot be read via a read-only call. valueSats remains 0
+      // until the protocol exposes a user-position read-only function.
+      pos.details.note =
+        "ALEX AMM v2 does not expose user LP positions via read-only calls. " +
+        `Pool total supply: ${totalSupply.toString()} units. ` +
+        `Pool aBTC balance: ${Number(balY).toLocaleString()} (ALEX fixed-point). ` +
+        "valueSats requires on-chain user position tracking not yet available.";
     }
   } catch (e) {
     pos.details.error = String(e);
   }
 
-  // TODO: Read user LP token balance for actual position value
   return pos;
 }
 
@@ -300,7 +315,7 @@ async function readBitflowPosition(
     pos.details.apySource = "fallback estimate (API unavailable)";
   }
 
-  // TODO: Read user Bitflow LP position
+  // Bitflow LP position reading requires on-chain query (position tracking not yet implemented)
   return pos;
 }
 
@@ -318,7 +333,6 @@ async function readStackingPosition(
   };
 
   try {
-
     const principalArg =
       "0x" +
       Buffer.from(serializeCV(standardPrincipalCV(walletAddress))).toString(
@@ -411,8 +425,8 @@ program
   .action(async () => {
     try {
       if (NETWORK !== "mainnet") {
-        printJson({ error: "yield-dashboard is mainnet-only" });
-        process.exit(1);
+        handleError(new Error("yield-dashboard is mainnet-only. Set NETWORK=mainnet to use this skill."));
+        return;
       }
 
       const walletAddress = await getWalletAddress();
@@ -490,8 +504,8 @@ program
   .action(async () => {
     try {
       if (NETWORK !== "mainnet") {
-        printJson({ error: "yield-dashboard is mainnet-only" });
-        process.exit(1);
+        handleError(new Error("yield-dashboard is mainnet-only. Set NETWORK=mainnet to use this skill."));
+        return;
       }
 
       const walletAddress = await getWalletAddress();
@@ -581,8 +595,8 @@ program
   .action(async (opts: { riskTolerance: string }) => {
     try {
       if (NETWORK !== "mainnet") {
-        printJson({ error: "yield-dashboard is mainnet-only" });
-        process.exit(1);
+        handleError(new Error("yield-dashboard is mainnet-only. Set NETWORK=mainnet to use this skill."));
+        return;
       }
 
       const walletAddress = await getWalletAddress();

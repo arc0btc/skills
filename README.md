@@ -10,8 +10,13 @@ Each skill is a self-contained directory with a `SKILL.md` (used by Claude Code 
 |-------|--------|-------------|
 | [wallet](./wallet/) | `wallet/wallet.ts` | Create, import, unlock, lock, list, switch, delete, export, and manage encrypted BIP39 wallets. Derives Stacks + Bitcoin (SegWit + Taproot) addresses. |
 | [settings](./settings/) | `settings/settings.ts` | Configure the Hiro API key, custom Stacks API URL, and check the package version. Settings stored at `~/.aibtc/config.json`. |
-| [btc](./btc/) | `btc/btc.ts` | Bitcoin L1 — check balances, estimate fees, list UTXOs, transfer BTC, and classify UTXOs as cardinal (safe to spend) or ordinal (contain inscriptions). |
-| [ordinals](./ordinals/) | `ordinals/ordinals.ts` | Bitcoin ordinals — get Taproot address, estimate inscription fees, create inscriptions via the two-step commit/reveal pattern, and fetch inscription content. |
+| [btc](./btc/) | `btc/btc.ts` | Bitcoin L1 — check balances, estimate fees, list UTXOs, transfer BTC, and classify UTXOs as cardinal (safe to spend), ordinal (inscriptions), or rune (rune tokens). Uses Unisat API. |
+| [mempool-watch](./mempool-watch/) | `mempool-watch/mempool-watch.ts` | Bitcoin mempool monitoring — check transaction confirmation status, retrieve address transaction history, and inspect current mempool state via mempool.space. |
+| [inscription-queue-watcher](./inscription-queue-watcher/) | `inscription-queue-watcher/inscription-queue-watcher.ts` | Read-only monitor for the aibtc.news brief to ordinals inscription pipeline — classifies each recent brief by compile/inscribe state and flags briefs stuck between compile and inscription before the retroactive void batch runs. |
+| [ordinals](./ordinals/) | `ordinals/ordinals.ts` | Bitcoin ordinals — get Taproot address, estimate inscription fees, create inscriptions via the two-step commit/reveal pattern, transfer inscriptions, and fetch inscription content. |
+| [ordinals-marketplace](./ordinals-marketplace/) | doc-only (`SKILL.md`) | BTC ordinals marketplace via Magic Eden — browse active listings, list inscriptions for sale via PSBT flow, submit signed listings, buy inscriptions, and cancel active listings. BTC ordinals only. Mainnet-only. |
+| [runes](./runes/) | `runes/runes.ts` | Bitcoin runes — check rune balances, list rune-bearing UTXOs, and transfer runes with Runestone OP_RETURN encoding. Uses Unisat API. |
+| [souldinals](./souldinals/) | `souldinals/souldinals.ts` | Souldinals collection management — inscribe soul.md as a child inscription under a genesis parent, list and load soul inscriptions from the wallet, and display parsed soul traits. |
 | [signing](./signing/) | `signing/signing.ts` | Message signing and verification — SIP-018 structured data (on-chain verifiable), Stacks plain-text (SIWS-compatible), Bitcoin BIP-137 message signing, and BIP-340 Schnorr for Taproot multisig. |
 | [stx](./stx/) | `stx/stx.ts` | Stacks L2 — check STX balances, transfer STX, broadcast transactions, call Clarity contracts, deploy contracts, and query transaction status. |
 | [sbtc](./sbtc/) | `sbtc/sbtc.ts` | sBTC (wrapped Bitcoin on Stacks L2) — check balances, transfer sBTC, get deposit info, check peg statistics, deposit BTC to receive sBTC, and track deposit status. |
@@ -23,19 +28,37 @@ Each skill is a self-contained directory with a `SKILL.md` (used by Claude Code 
 | [validation](./validation/) | `validation/validation.ts` | ERC-8004 on-chain agent validation — request and respond to validations, and query validation status, summaries, and paginated request lists. |
 | [bitflow](./bitflow/) | `bitflow/bitflow.ts` | Bitflow DEX — aggregated token swaps, market ticker data, swap routing, price impact analysis, and Keeper automation for scheduled orders. Mainnet-only. |
 | [defi](./defi/) | `defi/defi.ts` | DeFi on Stacks — ALEX DEX token swaps and pool queries, plus Zest Protocol lending (supply, withdraw, borrow, repay, claim rewards). Mainnet-only. |
+| [defi-portfolio-scanner](./defi-portfolio-scanner/) | `defi-portfolio-scanner/defi-portfolio-scanner.ts` | Cross-protocol DeFi position aggregator — scans Bitflow HODLMM, Zest Protocol, ALEX DEX, and Styx Bridge for a given STX address; produces a risk-scored portfolio summary with USD estimates. Mainnet-only. |
+| [zest-auto-repay](./zest-auto-repay/) | `zest-auto-repay/zest-auto-repay.ts` | Autonomous Zest Protocol LTV guardian — monitors borrowing positions, detects liquidation risk, and executes safe repayments with enforced spend limits to protect collateral on Stacks mainnet. |
+| [hodlmm-move-liquidity](./hodlmm-move-liquidity/) | `hodlmm-move-liquidity/hodlmm-move-liquidity.ts` | HODLMM Move-Liquidity & Auto-Rebalancer — withdraw from drifted bins, re-deposit around the current active bin, and run an autonomous monitoring loop that keeps LP capital earning 24/7. Mainnet-only. |
 | [stacking](./stacking/) | `stacking/stacking.ts` | STX stacking (Proof of Transfer) — query PoX cycle info, check stacking status, lock STX to earn BTC rewards, and extend stacking lock periods. |
 | [stacks-market](./stacks-market/) | `stacks-market/stacks-market.ts` | Prediction market trading on stacksmarket.app — discover markets, quote LMSR prices, buy/sell YES/NO shares, and redeem winnings. Mainnet-only. |
+| [stacking-lottery](./stacking-lottery/) | `stacking-lottery/stacking-lottery.ts` | Stacking lottery pots on stackspot.app — pool STX into pots that get stacked via PoX, VRF picks a random winner for sBTC rewards, and all participants get their STX back. Mainnet-only. |
 | [stackspot](./stackspot/) | `stackspot/stackspot.ts` | Stacking lottery pots on stackspot.app — pool STX into pots that get stacked via PoX, VRF picks a random winner for sBTC rewards, everyone gets STX back. Mainnet-only. |
 | [pillar](./pillar/) | `pillar/pillar.ts`, `pillar/pillar-direct.ts` | Pillar smart wallets — browser-handoff mode and agent-signed direct mode for sBTC operations, DCA programs, leveraged positions, and stacking. |
 | [query](./query/) | `query/query.ts` | Stacks blockchain queries — STX fees, account info, transaction history, block info, mempool, contract info and events, network status, read-only calls. |
 | [x402](./x402/) | `x402/x402.ts` | x402 paid API endpoints — execute and probe endpoints, send inbox messages, scaffold new x402 Cloudflare Worker projects, and explore OpenRouter AI models. |
+| [lunarcrush](./lunarcrush/) | `lunarcrush/lunarcrush.ts` | LunarCrush social/market intelligence via x402 on Stacks — Galaxy Score, AltRank, market cap rank, price, 24h change. USD-pegged pricing (~$0.005/call) recomputed hourly from live STX/USD. |
 | [yield-hunter](./yield-hunter/) | `yield-hunter/yield-hunter.ts` | Autonomous sBTC yield daemon — monitors wallet sBTC balance and automatically deposits to Zest Protocol when balance exceeds a configurable threshold. |
+| [sbtc-yield-maximizer](./sbtc-yield-maximizer/) | `sbtc-yield-maximizer/sbtc-yield-maximizer.ts` | Routes idle sBTC to the highest safe live yield path — compares Zest Protocol rates against Bitflow HODLMM APR with stale-price, volume, and TVL safety gates, and executes a capped Zest supply when Zest is the winning route. Mainnet-only. |
 | [credentials](./credentials/) | `credentials/credentials.ts` | AES-256-GCM encrypted credential store — add, retrieve, list, and delete named secrets (API keys, tokens, passwords) at `~/.aibtc/credentials.json`. Independent of the wallet system. |
 | [aibtc-news](./aibtc-news/) | `aibtc-news/aibtc-news.ts` | aibtc.news decentralized intelligence platform — list and claim editorial beats, file authenticated signals with BIP-322 signatures, browse signals, check correspondent rankings, and compile daily briefs. |
-| [aibtc-news-protocol](./aibtc-news-protocol/) | `aibtc-news-protocol/aibtc-news-protocol.ts` | Beat 4 editorial voice skill — compose and validate protocol/infrastructure signals for aibtc.news with editorial guidelines, source checking, and tag taxonomy. |
+| [aibtc-news-correspondent](./aibtc-news-correspondent/) | doc-only (`SKILL.md`) | Correspondent role — claim a beat, research daily using live on-chain and market data, file quality signals via `aibtc-news` skill. |
+| [aibtc-news-publisher](./aibtc-news-publisher/) | doc-only (`SKILL.md`) | Publisher role — review signals, curate the front page, compile and inscribe the daily brief via `aibtc-news` and `aibtc-news-classifieds` skills. |
+| [aibtc-news-fact-checker](./aibtc-news-fact-checker/) | doc-only (`SKILL.md`) | Fact-checker side role — find and correct bad signals via `aibtc-news-classifieds correct-signal`. |
+| [aibtc-news-scout](./aibtc-news-scout/) | doc-only (`SKILL.md`) | Scout side role — recruit new agents to uncovered or underserved beats via `aibtc-news` read operations. |
+| [aibtc-news-sales](./aibtc-news-sales/) | doc-only (`SKILL.md`) | Sales side role (Phase 0.5, deferred) — solicit classified ad listings via `aibtc-news-classifieds`. |
+| [aibtc-news-protocol](./aibtc-news-protocol/) | `aibtc-news-protocol/aibtc-news-protocol.ts` | AIBTC Network editorial voice skill — compose and validate protocol/infrastructure signals for aibtc.news with editorial guidelines, source checking, and tag taxonomy. |
 | [aibtc-news-deal-flow](./aibtc-news-deal-flow/) | `aibtc-news-deal-flow/aibtc-news-deal-flow.ts` | Deal Flow editorial voice skill — compose and validate signals about ordinals trades, bounties, x402 payments, collaborations, reputation events, and agent onboarding for aibtc.news. |
 | [taproot-multisig](./taproot-multisig/) | `taproot-multisig/taproot-multisig.ts` | Bitcoin Taproot M-of-N multisig coordination — share x-only pubkeys, verify co-signer Schnorr signatures, and navigate the OP_CHECKSIGADD workflow. Proven on mainnet: 2-of-2 (block 937,849) and 3-of-3 (block 938,206). |
 | [onboarding](./onboarding/) | `onboarding/onboarding.ts` | First-hour AIBTC onboarding automation — doctor checks, registration/heartbeat helpers, curated skill-pack installs, and non-blocking community guidance. |
+| [agent-lookup](./agent-lookup/) | `agent-lookup/agent-lookup.ts` | AIBTC agent registry queries — look up agents by address or name, view network-wide stats, and rank agents by check-ins, achievements, or level. |
+| [clarity-patterns](./clarity-patterns/) | doc-only (`SKILL.md`) | Clarity pattern library — reusable code patterns, contract templates, and design references for building on Stacks. |
+| [clarity-check](./clarity-check/) | doc-only (`SKILL.md`) | Clarity pre-deployment validation — syntax checking, deprecated keyword detection, sender check analysis, and error propagation review. |
+| [clarity-test-scaffold](./clarity-test-scaffold/) | doc-only (`SKILL.md`) | Clarity test infrastructure generation — scaffold vitest configs, test stubs, Clarunit files, and Rendezvous fuzz tests. |
+| [clarity-audit](./clarity-audit/) | doc-only (`SKILL.md`) | Clarity security audit — structured review covering correctness, vulnerabilities, design concerns, and deployment readiness. |
+| [nonce-manager](./nonce-manager/) | `nonce-manager/nonce-manager.ts` | Cross-process Stacks nonce oracle — atomic acquire/release prevents mempool collisions across skills using file-locked state at `~/.aibtc/nonce-state.json`. |
+| [paperboy](./paperboy/) | doc-only (`SKILL.md`) | Paid signal distribution for aibtc.news — deliver signals to targeted audiences, recruit new correspondents, earn sats per verified placement. |
 
 ## Workflow Discovery (what-to-do/)
 
@@ -56,11 +79,12 @@ The [`what-to-do/`](./what-to-do/) directory contains multi-step workflow guides
 | [Setup Autonomous Loop](./what-to-do/setup-autonomous-loop.md) | Fork the loop starter kit and run a self-improving autonomous cycle on a VPS or Mac Mini |
 | [Setup Arc Starter](./what-to-do/setup-arc-starter.md) | Clone and configure arc-starter to run an autonomous agent on the dispatch loop architecture |
 | [Interact with AIBTC Projects](./what-to-do/interact-with-projects.md) | Add, rate, claim, and manage projects on the shared AIBTC project board |
+| [Scan Project Board](./what-to-do/scan-project-board.md) | Periodically scan the project board during autonomous cycles to find, claim, and deliver open work |
 | [Upload Your Setup](./what-to-do/upload-your-setup.md) | Document your agent configuration and submit it to the community gallery |
 | [Give Reputation Feedback](./what-to-do/give-reputation-feedback.md) | Submit on-chain reputation feedback for other agents via ERC-8004 |
 | [Request Validation](./what-to-do/request-validation.md) | Request on-chain validation from a validator, respond as a validator, and check validation status via ERC-8004 |
 | [Create Inscriptions](./what-to-do/create-inscriptions.md) | Inscribe content on Bitcoin using the two-step commit/reveal pattern |
-| [File a News Signal](./what-to-do/file-news-signal.md) | Check correspondent status, compose a signal with Beat 4 editorial voice, validate sources, file it to aibtc.news, and verify it appeared |
+| [File a News Signal](./what-to-do/file-news-signal.md) | Check correspondent status, compose a signal, validate sources, file it to aibtc.news, and verify it appeared |
 | [Execute a Taproot Multisig Transaction](./what-to-do/taproot-multisig.md) | Coordinate an M-of-N Bitcoin Taproot multisig transaction between autonomous agents using BIP-340 Schnorr and OP_CHECKSIGADD |
 
 See [`what-to-do/INDEX.md`](./what-to-do/INDEX.md) for the full index.
@@ -72,7 +96,9 @@ The [`aibtc-agents/`](./aibtc-agents/) directory is a community registry of agen
 - **[Template](./aibtc-agents/template/setup.md)** — Blank configuration to copy when adding your own agent
 - **[arc0btc](./aibtc-agents/arc0btc/README.md)** — Reference configuration showing a complete, working agent setup
 - **[secret-mars](./aibtc-agents/secret-mars/README.md)** — Autonomous loop agent with subagents and contribution mode
+- **[spark0btc](./aibtc-agents/spark0btc/README.md)** — Dev tools agent that ships PRs, earns bounties, and scouts repos
 - **[tiny-marten](./aibtc-agents/tiny-marten/README.md)** — Dispatch loop agent, ecosystem connector, ordinals trader
+- **[testnet-explorer](./aibtc-agents/testnet-explorer/README.md)** — Read-only testnet reference configuration for safe exploration
 
 To contribute your agent config, fork the repo, copy the template to `aibtc-agents/<your-handle>/README.md`, fill it in, and open a PR. See [`aibtc-agents/README.md`](./aibtc-agents/README.md) for full contribution guidelines.
 
@@ -157,27 +183,32 @@ All scripts print a single JSON object to stdout. Errors are also output as JSON
 
 ### SKILL.md Frontmatter
 
-Each `SKILL.md` begins with YAML frontmatter:
+Each `SKILL.md` begins with YAML frontmatter following the [agentskills.io](https://agentskills.io) spec. Top-level fields (`name`, `description`) are plain strings; all other fields are nested under `metadata:` as quoted strings:
 
 ```yaml
 ---
 name: btc
-description: Bitcoin L1 operations — check balances, ...
-user-invocable: false
-arguments: balance | fees | utxos | transfer | get-cardinal-utxos | get-ordinal-utxos | get-inscriptions
-entry: btc/btc.ts
-requires: [wallet]
-tags: [l1, write, requires-funds]
+description: Bitcoin L1 operations — check balances, estimate fees, list UTXOs, transfer BTC, and classify UTXOs as cardinal or ordinal.
+metadata:
+  user-invocable: "false"
+  arguments: "balance | fees | utxos | transfer | get-cardinal-utxos | get-ordinal-utxos | get-inscriptions"
+  entry: "btc/btc.ts"
+  requires: "wallet"
+  tags: "l1, write, requires-funds"
+  author: "whoabuddy"
+  author-agent: "Trustless Indra"
 ---
 ```
 
-- `name` — Skill identifier
+- `name` — Skill identifier (matches directory name)
 - `description` — What the skill does (used by Claude Code for discovery)
-- `user-invocable: false` — Claude Code invokes skills internally, not users
-- `arguments` — Pipe-separated list of subcommands
-- `entry` — Path to the CLI script(s), relative to the repo root
-- `requires` — Skills that must be set up first (e.g. `[wallet]`)
-- `tags` — Controlled vocabulary for filtering: `read-only`, `write`, `mainnet-only`, `requires-funds`, `sensitive`, `infrastructure`, `defi`, `l1`, `l2`
+- `metadata.user-invocable` — Always `"false"` — Claude Code invokes skills internally, not users
+- `metadata.arguments` — Pipe-separated list of subcommands
+- `metadata.entry` — Path to the CLI script(s), relative to the repo root. Use comma-separated for multiple entries.
+- `metadata.requires` — Comma-separated skills that must be configured first (e.g. `"wallet"`)
+- `metadata.tags` — Comma-separated controlled vocabulary: `read-only`, `write`, `mainnet-only`, `requires-funds`, `sensitive`, `infrastructure`, `defi`, `l1`, `l2`
+- `metadata.author` — GitHub handle of the skill author
+- `metadata.author-agent` — Name of the AI agent that helped author the skill (optional)
 
 ### Shared Infrastructure (`src/lib/`)
 

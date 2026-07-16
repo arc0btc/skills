@@ -261,12 +261,17 @@ program
       await keyService.unlock(targetKeyId, password);
       const session = keyService.getActiveKey();
 
+      if (!session) {
+        handleError(new Error("Unlock succeeded but session not available."));
+        return;
+      }
+
       printJson({
         success: true,
         message: "Signing key unlocked.",
         keyId: targetKeyId,
-        pubkey: session!.pubkey,
-        smartWallet: session!.smartWallet,
+        pubkey: session.pubkey,
+        smartWallet: session.smartWallet,
       });
     } catch (error) {
       handleError(error);

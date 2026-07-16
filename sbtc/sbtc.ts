@@ -43,14 +43,7 @@ program
   .action(async (opts: { address?: string }) => {
     try {
       const sbtcService = getSbtcService(NETWORK);
-      let walletAddress: string;
-
-      if (opts.address) {
-        walletAddress = opts.address;
-      } else {
-        walletAddress = await getWalletAddress();
-      }
-
+      const walletAddress = opts.address ?? (await getWalletAddress());
       const balance = await sbtcService.getBalance(walletAddress);
 
       printJson({
@@ -295,21 +288,12 @@ program
 
         // Resolve fee rate
         let resolvedFeeRate: number;
-        if (opts.feeRate === "fast" || opts.feeRate === "medium" || opts.feeRate === "slow") {
+        const feePresets = ["fast", "medium", "slow"] as const;
+        type FeePreset = (typeof feePresets)[number];
+        if (feePresets.includes(opts.feeRate as FeePreset)) {
           const api = new MempoolApi(NETWORK);
           const feeTiers = await api.getFeeTiers();
-          switch (opts.feeRate) {
-            case "fast":
-              resolvedFeeRate = feeTiers.fast;
-              break;
-            case "slow":
-              resolvedFeeRate = feeTiers.slow;
-              break;
-            case "medium":
-            default:
-              resolvedFeeRate = feeTiers.medium;
-              break;
-          }
+          resolvedFeeRate = feeTiers[opts.feeRate as FeePreset];
         } else {
           resolvedFeeRate = parseInt(opts.feeRate, 10);
           if (isNaN(resolvedFeeRate) || resolvedFeeRate <= 0) {

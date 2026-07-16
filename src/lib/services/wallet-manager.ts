@@ -18,6 +18,9 @@ import {
   backupKeystore,
   restoreKeystoreBackup,
   deleteKeystoreBackup,
+  writeSessionFile,
+  readSessionFile,
+  deleteSessionFile,
   type WalletMetadata,
   type KeystoreFile,
   type WalletAddresses,
@@ -30,7 +33,15 @@ import {
 } from "../utils/errors.js";
 import { NETWORK, type Network } from "../config/networks.js";
 import type { Account } from "../transactions/builder.js";
-import { deriveBitcoinAddress, deriveBitcoinKeyPair, deriveTaprootAddress, deriveTaprootKeyPair } from "../utils/bitcoin.js";
+import { deriveBitcoinAddress, deriveBitcoinKeyPair, deriveTaprootAddress, deriveTaprootKeyPair, deriveNostrKeyPair } from "../utils/bitcoin.js";
+
+// ---------------------------------------------------------------------------
+// Private serialization helpers for optional Uint8Array key fields
+// ---------------------------------------------------------------------------
+const toHex = (b?: Uint8Array): string | undefined =>
+  b ? Buffer.from(b).toString("hex") : undefined;
+const fromHex = (h?: string): Buffer | undefined =>
+  h ? Buffer.from(h, "hex") : undefined;
 
 /**
  * Session state for unlocked wallet
@@ -231,6 +242,12 @@ class WalletManager {
       internalPubKeyBytes: taprootPublicKey,
     } = deriveTaprootKeyPair(mnemonic, walletMeta.network);
 
+    // Derive Nostr NIP-06 key pair (m/44'/1237'/0'/0/0)
+    const {
+      privateKey: nostrPrivateKey,
+      publicKeyBytes: nostrPublicKey,
+    } = deriveNostrKeyPair(mnemonic);
+
     const account: Account = {
       address,
       btcAddress,
@@ -240,6 +257,8 @@ class WalletManager {
       btcPublicKey,
       taprootPrivateKey,
       taprootPublicKey,
+      nostrPrivateKey,
+      nostrPublicKey,
       sponsorApiKey: walletMeta.sponsorApiKey,
       network: walletMeta.network,
     };
@@ -271,14 +290,20 @@ class WalletManager {
     config.activeWalletId = walletId;
     await writeAppConfig(config);
 
+    // Persist session to disk for cross-process access
+    await this.saveSessionToDisk();
+
     return account;
   }
 
   /**
-   * Lock the wallet (clear session)
+   * Lock the wallet (clear session) and remove any on-disk session file
    */
   lock(): void {
     this.clearAutoLockTimer();
+
+    const walletId = this.session?.walletId;
+
     // Zero out sensitive key buffers before dropping references
     if (this.session?.account) {
       const acct = this.session.account;
@@ -286,8 +311,88 @@ class WalletManager {
       if (acct.btcPublicKey) acct.btcPublicKey.fill(0);
       if (acct.taprootPrivateKey) acct.taprootPrivateKey.fill(0);
       if (acct.taprootPublicKey) acct.taprootPublicKey.fill(0);
+      if (acct.nostrPrivateKey) acct.nostrPrivateKey.fill(0);
+      if (acct.nostrPublicKey) acct.nostrPublicKey.fill(0);
     }
     this.session = null;
+
+    // Remove session file (best-effort — do not block on failure)
+    if (walletId) {
+      deleteSessionFile(walletId).catch(() => {});
+    }
+  }
+
+  /**
+   * Persist the active session to disk so other processes can restore it.
+   * Called automatically at the end of a successful unlock().
+   * The session is encrypted with a machine-local key stored in ~/.aibtc/sessions/.session-key.
+   */
+  private async saveSessionToDisk(): Promise<void> {
+    if (!this.session) return;
+
+    const { walletId, account, expiresAt } = this.session;
+
+    // Serialize Uint8Array / Buffer fields to hex for JSON round-trip
+    const serialized = {
+      address: account.address,
+      btcAddress: account.btcAddress,
+      taprootAddress: account.taprootAddress,
+      privateKey: account.privateKey,
+      btcPrivateKey: toHex(account.btcPrivateKey),
+      btcPublicKey: toHex(account.btcPublicKey),
+      taprootPrivateKey: toHex(account.taprootPrivateKey),
+      taprootPublicKey: toHex(account.taprootPublicKey),
+      nostrPrivateKey: toHex(account.nostrPrivateKey),
+      nostrPublicKey: toHex(account.nostrPublicKey),
+      sponsorApiKey: account.sponsorApiKey,
+      network: account.network,
+    };
+
+    try {
+      await writeSessionFile(walletId, serialized, expiresAt);
+    } catch {
+      // Non-fatal — in-memory session still works for this process
+    }
+  }
+
+  /**
+   * Attempt to restore a previously saved session from disk.
+   * Returns the restored Account if a valid, non-expired session exists,
+   * or null if no session file is found / the session has expired.
+   * Called by getAccount() in x402.service.ts before falling back to CLIENT_MNEMONIC.
+   */
+  async restoreSessionFromDisk(walletId: string): Promise<Account | null> {
+    const result = await readSessionFile(walletId).catch(() => null);
+    if (!result) return null;
+
+    const { account: s, expiresAt } = result;
+
+    // Reconstruct typed key buffers from hex
+    const account: Account = {
+      address: s.address,
+      btcAddress: s.btcAddress,
+      taprootAddress: s.taprootAddress,
+      privateKey: s.privateKey,
+      btcPrivateKey: fromHex(s.btcPrivateKey),
+      btcPublicKey: fromHex(s.btcPublicKey),
+      taprootPrivateKey: fromHex(s.taprootPrivateKey),
+      taprootPublicKey: fromHex(s.taprootPublicKey),
+      nostrPrivateKey: fromHex(s.nostrPrivateKey),
+      nostrPublicKey: fromHex(s.nostrPublicKey),
+      sponsorApiKey: s.sponsorApiKey,
+      network: s.network,
+    };
+
+    // Restore the in-memory session so subsequent in-process calls also work
+    const now = new Date();
+    this.session = {
+      walletId,
+      account,
+      unlockedAt: now,
+      expiresAt,
+    };
+
+    return account;
   }
 
   /**

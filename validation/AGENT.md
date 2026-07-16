@@ -8,34 +8,53 @@ description: ERC-8004 on-chain agent validation management — request and respo
 
 This agent manages ERC-8004 on-chain agent validation using the validation-registry contract. It handles requesting validations from validators, submitting validation responses, and all read-only queries for validation data. Read operations work without a wallet. Write operations require an unlocked wallet.
 
-## Capabilities
+## Prerequisites
 
-- Request validation from a specific validator for an agent (request)
-- Submit a validation response score as a validator (respond)
-- Get the status of a validation request by its request hash (get-status)
-- Get the aggregated validation summary (count + average score) for an agent (get-summary)
-- Get a paginated list of validation request hashes for an agent (get-agent-validations)
-- Get a paginated list of validation request hashes submitted to a validator (get-validator-requests)
+- For write operations (request, respond): wallet must be unlocked — run `bun run wallet/wallet.ts unlock` first
+- For read operations (get-status, get-summary, get-agent-validations, get-validator-requests): no wallet required
+- The target agent ID must exist in the identity registry before requesting validation
+- `respond`: the active wallet must match the validator address specified in the original request
+- `--request-hash` and `--response-hash` must be computed with SHA-256 before passing (exactly 32 bytes = 64 hex chars)
 
-## When to Delegate Here
+## Decision Logic
 
-Delegate to this agent when the workflow needs to:
-- Submit a formal validation request to a trusted validator for an agent identity
-- Respond to a pending validation request as a designated validator
-- Check the current status and score of a specific validation request
-- Retrieve an agent's overall validation score or count
-- Page through all validations associated with an agent
-- List all pending validation requests for a validator to process
+| Goal | Subcommand |
+|------|-----------|
+| Request validation from a specific validator for an agent | `request --validator <addr> --agent-id <id> --request-uri <uri> --request-hash <hex>` |
+| Submit a validation response score as a validator | `respond --request-hash <hex> --response <0-100> --response-uri <uri> --response-hash <hex>` |
+| Check the status and score of a specific validation request | `get-status --request-hash <hex>` — read-only |
+| Get the aggregated validation count and average score for an agent | `get-summary --agent-id <id>` — read-only |
+| List all validation request hashes for an agent | `get-agent-validations --agent-id <id>` — paginated |
+| List all validation request hashes submitted to a validator | `get-validator-requests --validator <addr>` — paginated |
 
-## Key Constraints
+## Safety Checks
 
-- request and respond require an unlocked wallet
-- respond: tx-sender must be the validator address specified in the original request
-- --request-hash and --response-hash must be exactly 32 bytes (64 hex characters); use SHA-256
-- --response must be an integer between 0 and 100 (inclusive); values outside this range are rejected
-- respond can be called multiple times on the same request hash for progressive score updates
-- Pagination is cursor-based; pass the cursor from one response into the next call to page through results
-- Validation is a Stacks L2 operation — check transaction status with `stx get-transaction-status` after write calls
+- `--request-hash` and `--response-hash` must each be exactly 32 bytes (64 hex characters); compute with SHA-256 before passing — do not use truncated or non-SHA-256 hashes
+- `respond` can only be called by the validator specified in the original request — the active wallet address must match `validator` in the on-chain record; verify with `get-status` first
+- `respond` can be called multiple times on the same request hash for progressive score updates — each call overwrites the previous response
+- `--response` must be an integer between 0 and 100 inclusive; values outside this range are rejected by the contract
+- Both `request` and `respond` submit Stacks L2 transactions — check status with `bun run stx/stx.ts get-transaction-status --txid <txid>` after submission
+
+## Error Handling
+
+| Error message | Cause | Fix |
+|--------------|-------|-----|
+| "No active wallet. Please unlock your wallet first." | Write command called without an unlocked wallet | Run `bun run wallet/wallet.ts unlock --password <password>` |
+| "--agent-id must be a non-negative integer" | Invalid agent ID | Pass a non-negative integer (e.g., `--agent-id 42`) |
+| "--response must be an integer between 0 and 100" | Response score out of range | Pass an integer from 0 to 100 inclusive |
+| "--request-hash must be exactly 32 bytes (64 hex characters)" | Hash is wrong length or not valid hex | Compute SHA-256 of the request data and pass the 64-char hex result |
+| "--response-hash must be exactly 32 bytes (64 hex characters)" | Response hash is wrong length or not valid hex | Compute SHA-256 of the response data |
+| "--cursor must be a non-negative integer" | Invalid pagination cursor | Use the `cursor` value from a previous paginated response |
+| "Validation request not found" | `get-status` found no record for the given hash | The request may not be confirmed yet; wait for tx confirmation or verify the hash |
+
+## Output Handling
+
+- `request`: extract `txid` to track the on-chain submission; `explorerUrl` links to the transaction
+- `respond`: extract `txid` to confirm the response was submitted; `response` confirms the score recorded
+- `get-status`: extract `hasResponse` (true if a score has been submitted), `response` (0–100 score), `validator`, and `agentId`; `lastUpdate` is the block height of the last response
+- `get-summary`: extract `count` (total validations) and `avgResponse` (average score 0–100) to assess overall agent validation quality
+- `get-agent-validations`: extract `validations` (array of request hash hex strings) and `cursor` (null if last page); use each hash with `get-status` for details
+- `get-validator-requests`: extract `requests` (array of request hash hex strings) and `cursor` for pagination; useful for validators processing their queue
 
 ## Example Invocations
 
@@ -46,21 +65,6 @@ bun run validation/validation.ts request --validator SP2... --agent-id 42 --requ
 # Submit a validation response score of 85
 bun run validation/validation.ts respond --request-hash a3f2b1...64hex --response 85 --response-uri ipfs://response-data --response-hash b4e9c2...64hex --tag security
 
-# Get the status of a validation request
-bun run validation/validation.ts get-status --request-hash a3f2b1...64hex
-
 # Get the aggregated validation summary for agent 42
 bun run validation/validation.ts get-summary --agent-id 42
-
-# List all validation request hashes for agent 42
-bun run validation/validation.ts get-agent-validations --agent-id 42
-
-# List validation request hashes for agent 42 with pagination
-bun run validation/validation.ts get-agent-validations --agent-id 42 --cursor 14
-
-# List all validation requests submitted to a validator
-bun run validation/validation.ts get-validator-requests --validator SP2...
-
-# List validator requests with pagination
-bun run validation/validation.ts get-validator-requests --validator SP2... --cursor 14
 ```

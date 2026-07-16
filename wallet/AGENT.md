@@ -6,42 +6,68 @@ description: Manages encrypted BIP39 wallet lifecycle — create, import, unlock
 
 # Wallet Agent
 
-This agent handles all wallet lifecycle operations for the AIBTC skill suite. It manages BIP39 wallets encrypted with AES-GCM at `~/.aibtc/`, providing Stacks L2 and Bitcoin L1 (native SegWit + Taproot) addresses. Nearly all other skills depend on an unlocked wallet for write operations — this agent is the prerequisite gatekeeper.
+Handles all wallet lifecycle operations for the AIBTC skill suite. Manages BIP39 wallets encrypted with AES-GCM at `~/.aibtc/`, providing Stacks L2 and Bitcoin L1 (native SegWit + Taproot) addresses. Nearly all other skills depend on an unlocked wallet for write operations — this agent is the prerequisite gatekeeper.
 
-## Capabilities
+## Prerequisites
 
-- Create new wallets with generated 24-word BIP39 mnemonics — requires name and password
-- Import existing wallets from a mnemonic phrase — requires unlocked session afterward
-- Unlock and lock wallets to enable or revoke write access for other skills
-- List, switch, and check status of multiple wallets
-- Export wallet mnemonics for backup — requires password confirmation
-- Rotate wallet passwords and configure auto-lock timeouts
-- Query STX balance directly from the wallet context
+- No prerequisites — this skill bootstraps all others
+- For `unlock`, `delete`, `export`, `rotate-password`: a wallet must already exist (`create` or `import` first)
+- For `switch`: the target wallet ID must be from the `list` output
 
-## When to Delegate Here
+## Decision Logic
 
-Delegate to this agent when the workflow needs to:
-- Set up a new agent identity before any other skill can operate
-- Unlock an existing wallet before a write operation in another skill
-- Switch the active wallet between multiple identities
-- Check wallet status or retrieve address information
-- Rotate credentials or configure security settings like auto-lock
+| Goal | Subcommand |
+|------|-----------|
+| First-time setup | `create` — generates a new 24-word mnemonic |
+| Restore existing wallet | `import` — requires the mnemonic phrase |
+| Enable write operations | `unlock` — required before transfers or contract calls |
+| Disable write operations | `lock` — clears key material from memory |
+| See all wallets | `list` — metadata only, no sensitive data |
+| Change active wallet | `switch` — then `unlock` with the new wallet's password |
+| Check readiness | `status` — first call to make in any workflow |
+| View addresses | `info` — requires an unlocked wallet |
+| Check STX funds | `stx-balance` — can pass `--address` to check any address |
+| Back up a wallet | `export` — requires password + `I_UNDERSTAND_THE_RISKS` |
+| Change encryption password | `rotate-password` — atomic: backs up, re-encrypts, verifies |
+| Configure auto-lock | `set-timeout` — set minutes (0 = never) |
 
-## Key Constraints
+## Safety Checks
 
-- Never log or expose password values — always treat `--password` as sensitive
-- Unlocking writes a session to disk; always lock afterward in untrusted environments
-- Export operations expose the mnemonic in plaintext output — handle with care
+- Always call `status` first to check if a wallet is unlocked before write operations
+- Never log or expose `--password`, `--mnemonic`, `--old-password`, or `--new-password` values
+- `export` prints the mnemonic in plaintext output — handle the output as a secret
+- `delete` is irreversible — confirm the wallet mnemonic is backed up before deleting
+- `rotate-password` locks the wallet on success — re-unlock with the new password
+
+## Error Handling
+
+| Error message | Cause | Fix |
+|--------------|-------|-----|
+| "No active wallet found" | No wallet exists or no wallet set as active | Run `create` or `import`, then `list` to get the wallet ID |
+| "Wallet is locked" | Wallet exists but not unlocked | Run `unlock --password <password>` |
+| "Invalid password" | Wrong password supplied | Check the password; use `export` only with the correct password |
+| "Confirmation required" | `--confirm` flag not set to exact value | Pass `--confirm DELETE` or `--confirm I_UNDERSTAND_THE_RISKS` exactly |
+
+## Output Handling
+
+- `status`: check `readyForTransactions` (boolean) — if `false`, follow `nextAction` before proceeding
+- `create` / `import` / `unlock`: extract `walletId`, `Bitcoin (L1)`, and `Stacks (L2)` fields for display or downstream use
+- `list`: use `id` field values for `--wallet-id` in subsequent subcommands; check `isActive` and `isUnlocked`
+- `stx-balance`: read `balance.stx` for display; use `balance.microStx` for transaction calculations
+- `export`: treat the `mnemonic` field as a secret — do not log or display in insecure contexts
 
 ## Example Invocations
 
 ```bash
+# Check wallet status before any operation
+bun run wallet/wallet.ts status
+
 # Create a new wallet on mainnet
 bun run wallet/wallet.ts create --name main --password <password> --network mainnet
 
 # Unlock the active wallet to enable write operations
 bun run wallet/wallet.ts unlock --password <password>
 
-# Check active wallet status and addresses
-bun run wallet/wallet.ts status
+# List all wallets to find wallet IDs
+bun run wallet/wallet.ts list
 ```

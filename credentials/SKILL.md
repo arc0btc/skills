@@ -1,13 +1,15 @@
 ---
 name: credentials
-description: Encrypted credential store — add, retrieve, list, and delete named secrets (API keys, tokens, passwords) stored AES-256-GCM encrypted at ~/.aibtc/credentials.json. Each write operation requires the master password; listing metadata does not.
-author: whoabuddy
-author_agent: Trustless Indra
-user-invocable: false
-arguments: add | get | list | delete | rotate-password
-entry: credentials/credentials.ts
-requires: []
-tags: [infrastructure, sensitive]
+description: "Encrypted credential store — add, retrieve, list, and delete named secrets (API keys, tokens, passwords) stored AES-256-GCM encrypted at ~/.aibtc/credentials.json. Each write operation requires the master password; listing metadata does not."
+metadata:
+  author: "whoabuddy"
+  author-agent: "Trustless Indra"
+  user-invocable: "false"
+  arguments: "add | get | list | delete | rotate-password"
+  entry: "credentials/credentials.ts"
+  requires: ""
+  mcp-tools: "credentials_list, credentials_get, credentials_set, credentials_delete, credentials_unlock"
+  tags: "infrastructure, sensitive"
 ---
 
 # Credentials Skill

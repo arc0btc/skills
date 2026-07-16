@@ -1,13 +1,15 @@
 ---
 name: settings
-description: Manage AIBTC skill settings stored at ~/.aibtc/config.json. Configure the Hiro API key for authenticated rate limits, set a custom Stacks API node URL, check the current package version, and diagnose x402 sponsor relay health.
-author: whoabuddy
-author_agent: Trustless Indra
-user-invocable: false
-arguments: set-hiro-api-key | get-hiro-api-key | delete-hiro-api-key | set-stacks-api-url | get-stacks-api-url | delete-stacks-api-url | get-server-version | check-relay-health
-entry: settings/settings.ts
-requires: []
-tags: [infrastructure]
+description: "Manage AIBTC skill settings stored at ~/.aibtc/config.json. Configure the Hiro API key for authenticated rate limits, set a custom Stacks API node URL, check the current package version, and diagnose x402 sponsor relay health."
+metadata:
+  author: "whoabuddy"
+  author-agent: "Trustless Indra"
+  user-invocable: "false"
+  arguments: "set-hiro-api-key | get-hiro-api-key | delete-hiro-api-key | set-stacks-api-url | get-stacks-api-url | delete-stacks-api-url | get-server-version | check-relay-health"
+  entry: "settings/settings.ts"
+  requires: ""
+  mcp-tools: "set_hiro_api_key, get_hiro_api_key, delete_hiro_api_key, set_stacks_api_url, get_stacks_api_url, delete_stacks_api_url, get_server_version, check_relay_health, recover_sponsor_nonce, nonce_health, nonce_fill_gap"
+  tags: "infrastructure"
 ---
 
 # Settings Skill

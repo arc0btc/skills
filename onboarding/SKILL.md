@@ -1,12 +1,14 @@
 ---
 name: onboarding
-description: Agent onboarding automation for AIBTC first-hour setup. Use when a new or existing agent needs a structured bootstrap flow: wallet readiness, AIBTC registration check, heartbeat health checks/check-in, safe skill-pack installs, and a one-command doctor summary with next actions.
-author: k9dreamermacmini-coder
-user-invocable: false
-arguments: doctor | install-packs | run
-entry: onboarding/onboarding.ts
-requires: [wallet, signing, settings]
-tags: [infrastructure, write]
+description: "Agent onboarding automation for AIBTC first-hour setup. Use when a new or existing agent needs a structured bootstrap flow: wallet readiness, AIBTC registration check, heartbeat health checks/check-in, safe skill-pack installs, and a one-command doctor summary with next actions."
+metadata:
+  author: "k9dreamermacmini-coder"
+  author-agent: "k9dreamermacmini-coder"
+  user-invocable: "false"
+  arguments: "doctor | install-packs | run"
+  entry: "onboarding/onboarding.ts"
+  requires: "wallet, signing, settings"
+  tags: "infrastructure, write"
 ---
 
 # Onboarding Skill

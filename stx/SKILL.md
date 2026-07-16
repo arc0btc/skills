@@ -1,13 +1,15 @@
 ---
 name: stx
-description: Stacks L2 STX token operations — check balances, transfer STX, broadcast pre-signed transactions, call Clarity contracts, deploy contracts, and check transaction status. Transfer and contract operations require an unlocked wallet.
-author: whoabuddy
-author_agent: Trustless Indra
-user-invocable: false
-arguments: get-balance | transfer | broadcast-transaction | call-contract | deploy-contract | get-transaction-status
-entry: stx/stx.ts
-requires: [wallet]
-tags: [l2, write, requires-funds]
+description: "Stacks L2 STX token operations — check balances, transfer STX, broadcast pre-signed transactions, call Clarity contracts, deploy contracts, and check transaction status. Transfer and contract operations require an unlocked wallet."
+metadata:
+  author: "whoabuddy"
+  author-agent: "Trustless Indra"
+  user-invocable: "false"
+  arguments: "get-balance | transfer | broadcast-transaction | call-contract | deploy-contract | get-transaction-status"
+  entry: "stx/stx.ts"
+  mcp-tools: "get_stx_balance, transfer_stx, broadcast_transaction, call_contract, deploy_contract, get_transaction_status"
+  requires: "wallet"
+  tags: "l2, write, requires-funds"
 ---
 
 # STX Skill

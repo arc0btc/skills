@@ -6,43 +6,70 @@ description: x402 paid API endpoint interactions, inbox messaging with sBTC micr
 
 # x402 Agent
 
-This agent handles x402 protocol operations: discovering and executing paid API endpoints, sending inbox messages to other AIBTC agents with automatic sBTC micropayment handling, scaffolding new x402 Cloudflare Worker projects, and exploring OpenRouter AI model options. Payment flows are handled automatically using the configured wallet.
+This agent handles x402 protocol operations: discovering and executing paid API endpoints, sending inbox messages to other AIBTC agents with automatic sBTC micropayment handling, scaffolding new x402 Cloudflare Worker projects, and exploring OpenRouter AI model options. Payment flows are handled automatically using the configured wallet. Caller-facing payment status comes from canonical payment-status polling by `paymentId`; legacy `submitted` is collapsed to `queued`.
 
-## Capabilities
+## Prerequisites
 
-- List known x402 API endpoint sources with descriptions and usage examples
-- Execute a paid x402 endpoint (payment handled automatically via sBTC)
-- Probe an x402 endpoint to check payment requirements without executing
-- Send an inbox message to another AIBTC agent (costs 100 satoshis via x402 sBTC payment)
-- Scaffold a new x402 Cloudflare Worker API project
-- Scaffold an x402 AI endpoint backed by OpenRouter
-- Get the OpenRouter integration guide for building AI-powered x402 endpoints
-- List available OpenRouter models and their pricing
+- `list-endpoints`, `probe-endpoint`, `openrouter-guide`, `openrouter-models`: no wallet required
+- `execute-endpoint` with a paid endpoint: requires an unlocked wallet with sufficient sBTC or STX balance
+- `send-inbox-message`: requires an unlocked wallet with sBTC balance (sponsored tx flow; no STX gas needed)
+- `scaffold-endpoint` and `scaffold-ai-endpoint`: no wallet required if `--recipient-address` is provided; otherwise uses active wallet
+- `NETWORK` environment variable must be `mainnet` for live payments (default: testnet)
 
-## When to Delegate Here
+## Decision Logic
 
-Delegate to this agent when the workflow needs to:
-- Send a message to another agent's AIBTC inbox (required for inter-agent communication)
-- Call a paid API endpoint that requires x402 sBTC micropayment
-- Discover what x402 endpoints are available before deciding which to call
-- Create a new x402-enabled API service or AI endpoint
-- Find the right OpenRouter model for an AI feature
+| Goal | Subcommand |
+|------|-----------|
+| Discover available x402 API sources and example endpoints | `list-endpoints` |
+| Check cost of an endpoint without paying | `probe-endpoint --url <url>` |
+| Call a paid x402 endpoint and pay automatically | `execute-endpoint --url <url> --auto-approve` |
+| Call a potentially paid endpoint with cost confirmation first | `execute-endpoint --url <url>` (omit `--auto-approve`) |
+| Send a message to another AIBTC agent's inbox | `send-inbox-message --recipient-btc-address <bc1...> --recipient-stx-address <SP...> --content "..."` |
+| Generate a new x402 Cloudflare Worker API project | `scaffold-endpoint --output-dir <dir> --project-name <name> --endpoints <json>` |
+| Generate a new x402 AI endpoint with OpenRouter | `scaffold-ai-endpoint --output-dir <dir> --project-name <name> --endpoints <json>` |
+| Explore OpenRouter integration patterns and code templates | `openrouter-guide` |
+| Find the right OpenRouter model for a task | `openrouter-models --category <fast\|quality\|cheap\|code\|long-context>` |
 
-## Key Constraints
+## Safety Checks
 
-- Inbox messaging costs 100 satoshis per new message — requires sBTC balance and unlocked wallet
-- Payment goes directly to the recipient's STX address, not via platform intermediary
-- Sponsored transactions may be available via `sponsorApiKey` from AIBTC registration
+- Always `probe-endpoint` before `execute-endpoint` when cost is unknown — omitting `--auto-approve` will probe automatically
+- Verify sBTC balance in the active wallet before `send-inbox-message` (cost is 100 satoshis per message)
+- Verify STX balance before executing endpoints that charge in STX
+- Only HTTPS endpoints are allowed — `http://` URLs will be rejected
+- `scaffold-endpoint` and `scaffold-ai-endpoint` will error if the output directory already exists — check before running
+- `send-inbox-message` content is capped at 500 characters — truncate before calling
+
+## Error Handling
+
+| Error message | Cause | Fix |
+|--------------|-------|-----|
+| "Either --url or --path must be provided" | `execute-endpoint` or `probe-endpoint` called without a target | Add `--url <full-url>` or `--path <path>` |
+| "Only HTTPS URLs are allowed for x402 endpoints" | HTTP URL passed to `--url` | Replace with HTTPS equivalent |
+| "--params must be valid JSON" | Malformed JSON passed to `--params` | Wrap in single quotes, ensure valid JSON object |
+| "--data must be valid JSON" | Malformed JSON passed to `--data` | Wrap in single quotes, ensure valid JSON object |
+| "Message content exceeds 500 character limit" | `--content` too long for `send-inbox-message` | Shorten content to ≤500 characters |
+| "Expected 402 payment challenge, got <N>: ..." | Inbox API returned unexpected status | Check that recipient addresses are valid and aibtc.com is reachable |
+| "Directory already exists at <path>" | Scaffold target directory already exists | Choose a different `--project-name` or remove existing directory |
+| "Project name must be lowercase with hyphens only" | Invalid project name format | Use kebab-case, e.g., `my-x402-api` |
+
+## Output Handling
+
+- `list-endpoints`: read `sources[].url` and `sources[].example` to pick an endpoint to probe or execute
+- `probe-endpoint`: if `type === "payment_required"`, read `payment.amount` and `payment.asset` to confirm cost before executing; if `type === "free"`, read `response` for the data
+- `execute-endpoint`: read `response` for the API response data. If the upstream returns canonical payment tracking metadata and the client can confirm it, output also includes `payment.status`, `payment.paymentId`, `payment.terminalReason`, and `payment.checkUrl`. When canonical tracking is unavailable, those fields stay absent instead of exposing the client `payment-identifier` idempotency key as public `paymentId`. `x402-api` remains an immediate pay-per-call exception and does not establish a generic local payment-status route contract.
+- `send-inbox-message`: read `success` as the caller-facing delivery signal. `success: true` means delivery is confirmed; `success: false` means the payment flow completed but delivery is still in flight or terminal. For transport-level retry completion inside the internal helper, `messageDelivered` is the authoritative distinction. When `success` is `false`, read `payment.status`, `payment.paymentId`, and `payment.terminalReason`. Use `payment.checkUrl` only when present as a canonical hint instead of assuming a universal local status route.
+- `scaffold-endpoint` / `scaffold-ai-endpoint`: read `projectPath` for the created directory; follow `nextSteps` to install and run
+- `openrouter-models`: read `models[].id` to get the model string to use in `scaffold-ai-endpoint --default-model`
 
 ## Example Invocations
 
 ```bash
-# List available x402 API endpoint sources
-bun run x402/x402.ts list-endpoints
+# Probe an endpoint to check its cost before paying
+bun run x402/x402.ts probe-endpoint --url https://x402.biwas.xyz/api/pools/trending
 
-# Send a message to another agent's inbox
-bun run x402/x402.ts send-inbox-message --recipient-btc-address bc1q... --recipient-stx-address SP... --content "Hello from my agent"
+# Execute a paid endpoint with auto-payment
+NETWORK=mainnet bun run x402/x402.ts execute-endpoint --url https://stx402.com/ai/dad-joke --auto-approve
 
-# Probe an x402 endpoint to check payment requirements
-bun run x402/x402.ts probe-endpoint --url https://api.example.com/paid-resource
+# Send an inbox message to another agent
+NETWORK=mainnet bun run x402/x402.ts send-inbox-message --recipient-btc-address bc1q... --recipient-stx-address SP... --content "Hello from my agent"
 ```

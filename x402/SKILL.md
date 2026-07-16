@@ -1,13 +1,15 @@
 ---
 name: x402
-description: x402 paid API endpoints, inbox messaging, project scaffolding, and OpenRouter AI integration. Execute and probe x402-enabled endpoints from multiple sources, send inbox messages with sponsored sBTC transactions, scaffold new x402 Cloudflare Worker projects, and explore OpenRouter model options.
-author: whoabuddy
-author_agent: Trustless Indra
-user-invocable: false
-arguments: list-endpoints | execute-endpoint | probe-endpoint | send-inbox-message | scaffold-endpoint | scaffold-ai-endpoint | openrouter-guide | openrouter-models
-entry: x402/x402.ts
-requires: [wallet]
-tags: [l2, write]
+description: "x402 paid API endpoints, inbox messaging, project scaffolding, and OpenRouter AI integration. Execute and probe x402-enabled endpoints from multiple sources, send inbox messages with sponsored sBTC transactions, scaffold new x402 Cloudflare Worker projects, and explore OpenRouter model options."
+metadata:
+  author: "whoabuddy"
+  author-agent: "Trustless Indra"
+  user-invocable: "false"
+  arguments: "list-endpoints | execute-endpoint | probe-endpoint | send-inbox-message | scaffold-endpoint | scaffold-ai-endpoint | openrouter-guide | openrouter-models"
+  entry: "x402/x402.ts"
+  mcp-tools: "list_x402_endpoints, execute_x402_endpoint, probe_x402_endpoint, scaffold_x402_endpoint, scaffold_x402_ai_endpoint, openrouter_integration_guide, openrouter_models"
+  requires: "wallet"
+  tags: "l2, write"
 ---
 
 # x402 Skill
@@ -114,9 +116,22 @@ Output:
 ```json
 {
   "endpoint": "GET https://x402.biwas.xyz/api/pools/trending",
-  "response": { ... }
+  "response": { ... },
+  "payment": {
+    "status": "queued",
+    "terminalReason": null,
+    "action": "poll",
+    "guidance": "Payment is still in flight. Keep polling this paymentId and do not rebuild or re-sign.",
+    "paymentId": "relay_pay_123",
+    "checkUrl": "https://relay.example/rpc/payment-check/relay_pay_123",
+    "txid": null
+  }
 }
 ```
+
+Notes:
+- `payment` is only included when canonical payment metadata is actually known.
+- The client-side `payment-identifier` extension is an idempotency key for relay dedup, not caller-facing canonical `paymentId`.
 
 ### send-inbox-message
 
@@ -137,18 +152,32 @@ Options:
 Output:
 ```json
 {
-  "success": true,
-  "message": "Message delivered",
+  "success": false,
+  "message": "Payment is still in flight. Keep polling the same paymentId; do not rebuild or re-sign.",
   "recipient": { "btcAddress": "bc1q...", "stxAddress": "SP..." },
   "contentLength": 22,
   "inbox": { ... },
-  "payment": { "txid": "0x...", "amount": "1000 sats sBTC" }
+  "payment": {
+    "amount": "1000 sats sBTC",
+    "status": "queued",
+    "terminalReason": null,
+    "action": "poll",
+    "paymentId": "pay_123",
+    "checkUrl": "https://aibtc.com/rpc/payment-check/pay_123",
+    "txid": null
+  }
 }
 ```
 
+Notes:
+- Caller-facing payment states collapse legacy `submitted` to `queued`.
+- `send-inbox-message` reports caller-facing `success: true` only after confirmed delivery. Internally, the retry helper's `success` flag only means the workflow completed without throwing; `messageDelivered` is the delivery confirmation bit.
+- When payment is still in flight, keep polling the same `payment.paymentId`. Use `payment.checkUrl` only when the server returns a canonical hint; do not assume every x402 endpoint exposes a local `/api/payment-status/:paymentId` route. `x402-api` remains an immediate pay-per-call exception and does not create a generic local polling contract.
+- `terminalReason` is the normalized terminal signal when a payment reaches a terminal state.
+
 ### scaffold-endpoint
 
-Create a complete x402 paid API project as a Cloudflare Worker. Generates a new project folder with Hono.js app, x402 payment middleware, wrangler config, and README.
+Create a complete x402 paid API project as a Cloudflare Worker. Generates a new project folder with Hono.js app, x402 payment middleware, wrangler.jsonc config, and README.
 
 ```
 bun run x402/x402.ts scaffold-endpoint \

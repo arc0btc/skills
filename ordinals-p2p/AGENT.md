@@ -1,72 +1,74 @@
 ---
-name: ordinals-p2p
+name: ordinals-p2p-agent
 skill: ordinals-p2p
 description: Agent instructions for P2P ordinals trading via the trade ledger — decision logic, safety checks, and error handling.
 ---
 
-# Ordinals P2P Trading — Agent Instructions
+# Ordinals P2P Agent
+
+This agent coordinates peer-to-peer ordinals trading on the trade ledger at `ledger.drx4.xyz`. Agents can list inscriptions for sale, negotiate through counter-offers, execute transfers, record PSBT atomic swaps, and cancel open trades. All write operations use BIP-137 message signing for authentication. Read operations require no wallet.
 
 ## Prerequisites
 
-1. Wallet must be unlocked for write operations (create-offer, counter, transfer, cancel, psbt-swap)
-2. Read operations (list-trades, get-trade, my-trades, agents) work without a wallet
+- Wallet must be unlocked for all write operations (create-offer, counter, transfer, cancel, psbt-swap)
+- Read operations (list-trades, get-trade, my-trades, agents) work without a wallet if `--address` is provided for `my-trades`
+- Verify inscription ownership before creating offers — use `bun run ordinals/ordinals.ts get-inscription --txid <txid>`
+- Timestamps are validated within 300 seconds of server time — do not pre-build signed requests
 
 ## Decision Logic
 
-**When to create an offer:**
-- You own an inscription and want to sell it
-- Set a fair price based on inscription type and market conditions
-- Always specify the `--to` address if you have a specific buyer
-
-**When to use psbt-swap vs transfer:**
-- `psbt-swap`: Trustless atomic exchange — both inscription and payment settle in one Bitcoin transaction. Requires PSBT coordination between agents. Record the `--tx-hash` after broadcast.
-- `transfer`: Off-chain agreement — inscription transferred separately from payment. Use when trust is established or payment is on L2 (sBTC).
-
-**Negotiation flow:**
-1. Seller: `create-offer` with asking price
-2. Buyer: `counter` with bid (or accept via `transfer`)
-3. Repeat counters until agreed
-4. Winner: `transfer` or `psbt-swap` to close
+| Goal | Subcommand |
+|------|-----------|
+| Browse all open trades on the ledger | `list-trades` — filter with `--status open` |
+| Look up a specific trade and its history | `get-trade --id <tradeId>` |
+| List an inscription for sale | `create-offer --inscription <id> --amount <sats>` |
+| Counter an existing offer with a different price | `counter --parent <tradeId> --inscription <id> --amount <sats>` |
+| Record a completed off-chain or L2 transfer | `transfer --inscription <id> --to <btcAddr>` |
+| Record a completed on-chain PSBT atomic swap | `psbt-swap --inscription <id> --to <addr> --amount <sats> --tx-hash <txid>` |
+| Cancel an open offer or counter you created | `cancel --parent <tradeId> --inscription <id>` |
+| See your own open and completed trades | `my-trades` — requires unlocked wallet or `--address` |
+| See which agents are active on the ledger | `agents` |
 
 ## Safety Checks
 
-- **Verify inscription ownership** before creating offers — check via ordinals skill `get-inscription`
-- **Verify BTC address** format for `--to` parameter (must be valid bc1q/bc1p/1.../3... address)
-- **Check existing offers** for the same inscription before creating duplicates: `list-trades --inscription <id> --status open`
-- **Only parties to a trade** can cancel or counter it — the API enforces this
+- Verify you own the inscription before creating an offer — check via `ordinals get-inscription` or `btc get-ordinal-utxos`
+- Check for duplicate open offers before creating: `list-trades --inscription <id> --status open`
+- Only parties to a trade can cancel or counter — the API enforces this at the server
+- Prefer `psbt-swap` over `transfer` when possible — atomic swaps settle both sides in one transaction; off-chain transfers rely on trust
+- For `transfer`, include `--tx-hash` when there is an on-chain Bitcoin transaction to reference
+- Confirm the counterparty's Bitcoin address format before submitting (bc1q, bc1p, 1..., or 3... for mainnet)
+- Zero-amount trades are allowed (gifts); confirm intent before sending
 
 ## Error Handling
 
-| Error | Action |
-|-------|--------|
-| 401 Unauthorized | Wallet not unlocked, or signature verification failed |
-| 400 Bad Request | Missing required fields or invalid trade type |
-| 403 Forbidden | Attempting to cancel/counter a trade you're not party to |
-| 409 Conflict | Replay detected — signature already used. Retry with fresh timestamp |
-| 404 Not Found | Trade ID doesn't exist (for counter/cancel with --parent) |
-
-## Trade Lifecycle
-
-```
-offer (open) → counter (countered) → transfer/psbt_swap (completed)
-     ↓                    ↓
-   cancel (cancelled)   cancel (cancelled)
-```
+| Error message | Cause | Fix |
+|--------------|-------|-----|
+| "Wallet is not unlocked." | Write operation called without unlocked wallet | Run `bun run wallet/wallet.ts unlock --password <password>` |
+| "Bitcoin keys not available. Unlock your wallet." | BTC keys missing from session | Unlock wallet again |
+| "Provide --address <btcAddr> or unlock your wallet first." | `my-trades` called with no wallet and no address | Pass `--address` or unlock wallet |
+| "Ledger API 401: ..." | Signature verification failed or wallet mismatch | Ensure signing key matches registered address; retry |
+| "Ledger API 403: ..." | Attempting to cancel/counter a trade you are not party to | Only the original parties can modify a trade |
+| "Ledger API 404: ..." | Trade ID from `--parent` does not exist | Verify `tradeId` with `get-trade --id <tradeId>` |
+| "Ledger API 409: ..." | Replay attack detected — signature already used | Retry immediately; the timestamp will differ |
+| "Invalid amount: ..." | Non-numeric or negative amount passed | Provide a non-negative integer for `--amount` |
 
 ## Output Handling
 
-Write operations return the created trade:
-```json
-{
-  "trade": {
-    "id": 22,
-    "type": "offer",
-    "from_agent": "bc1q...",
-    "inscription_id": "abc...i0",
-    "amount_sats": 50000,
-    "status": "open"
-  }
-}
-```
+- Write operations return `{ "success": true, "trade": { ... } }` — extract `trade.id` for follow-up counter/cancel operations
+- `trade.status` transitions: `open` → `countered` → `completed` or `cancelled`
+- `list-trades` and `my-trades` return `{ "trades": [...], "total": N }` — iterate `trades` array for open offers
+- `get-trade` returns `{ "trade": { ... }, "history": [...] }` — `history` shows all counter and cancel events
+- `agents` returns `{ "agents": [...] }` — use `agents[].btcAddress` to identify counterparties
 
-Extract `trade.id` for follow-up operations (counter, cancel).
+## Example Invocations
+
+```bash
+# Browse open offers on the ledger
+bun run ordinals-p2p/ordinals-p2p.ts list-trades --status open --limit 20
+
+# Create an offer (requires unlocked wallet)
+bun run ordinals-p2p/ordinals-p2p.ts create-offer --inscription abc123...i0 --amount 50000
+
+# Counter an existing offer
+bun run ordinals-p2p/ordinals-p2p.ts counter --parent 22 --inscription abc123...i0 --amount 45000
+```

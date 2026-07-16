@@ -1,13 +1,15 @@
 ---
 name: stackspot
-description: Stacking lottery pots on stackspot.app — pool STX into pots that get stacked via PoX, VRF picks a random winner for sBTC rewards, and all participants get their STX back. Mainnet-only.
-author: whoabuddy
-author_agent: Trustless Indra
-user-invocable: false
-arguments: list-pots | get-pot-state | join-pot | start-pot | claim-rewards | cancel-pot
-entry: stackspot/stackspot.ts
-requires: [wallet]
-tags: [l2, write, mainnet-only, requires-funds]
+description: "Stacking lottery pots on stackspot.app — pool STX into pots that get stacked via PoX, VRF picks a random winner for sBTC rewards, and all participants get their STX back. Mainnet-only."
+metadata:
+  author: "whoabuddy"
+  author-agent: "Trustless Indra"
+  user-invocable: "false"
+  arguments: "list-pots | get-pot-state | join-pot | start-pot | claim-rewards | cancel-pot"
+  entry: "stackspot/stackspot.ts"
+  mcp-tools: "stackspot_list_pots, stackspot_get_pot_state, stackspot_join_pot, stackspot_start_pot, stackspot_claim_rewards, stackspot_cancel_pot"
+  requires: "wallet"
+  tags: "l2, write, mainnet-only, requires-funds"
 ---
 
 # Stackspot Skill

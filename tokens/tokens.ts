@@ -47,14 +47,7 @@ program
   .action(async (opts: { token: string; address?: string }) => {
     try {
       const tokensService = getTokensService(NETWORK);
-      let walletAddress: string;
-
-      if (opts.address) {
-        walletAddress = opts.address;
-      } else {
-        walletAddress = await getWalletAddress();
-      }
-
+      const walletAddress = opts.address ?? (await getWalletAddress());
       const balance = await tokensService.getBalance(opts.token, walletAddress);
 
       printJson({
@@ -192,14 +185,7 @@ program
   .action(async (opts: { address?: string }) => {
     try {
       const tokensService = getTokensService(NETWORK);
-      let walletAddress: string;
-
-      if (opts.address) {
-        walletAddress = opts.address;
-      } else {
-        walletAddress = await getWalletAddress();
-      }
-
+      const walletAddress = opts.address ?? (await getWalletAddress());
       const tokens = await tokensService.getUserTokens(walletAddress);
 
       printJson({

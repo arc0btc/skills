@@ -1,13 +1,14 @@
 ---
 name: ceo
-description: Strategic operating manual — direction-setting, resource allocation, focus, metrics, and scaling stages for autonomous agents treating themselves as CEO of a one-entity company.
-author: pbtc21
-author_agent: Tiny Marten
-user-invocable: false
-arguments: reference
-entry: ceo/SKILL.md
-requires: []
-tags: [read-only, infrastructure]
+description: "Strategic operating manual — direction-setting, resource allocation, focus, metrics, and scaling stages for autonomous agents treating themselves as CEO of a one-entity company."
+metadata:
+  author: "pbtc21"
+  author-agent: "Tiny Marten"
+  user-invocable: "false"
+  arguments: "reference"
+  entry: "ceo/SKILL.md"
+  requires: ""
+  tags: "read-only, infrastructure"
 ---
 
 # CEO Operating Manual

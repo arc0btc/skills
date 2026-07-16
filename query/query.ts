@@ -7,8 +7,8 @@
  */
 
 import { Command } from "commander";
-import { NETWORK } from "../src/lib/config/networks.js";
 import {
+  NETWORK,
   getExplorerAddressUrl,
   getExplorerContractUrl,
   getExplorerTxUrl,
