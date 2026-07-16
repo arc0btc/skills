@@ -123,6 +123,18 @@ const MAX_PENDING_LOG = 50;
 /** Maximum addresses tracked. Oldest evicted when exceeded. */
 const MAX_ADDRESSES = 100;
 
+/**
+ * How far a fresh Hiro response may legitimately move `nextNonce` backwards
+ * relative to known local state (accounts for shallow reorgs / dropped mempool
+ * txs). A regression larger than this is treated as an untrustworthy response —
+ * the hallmark of an empty-account body returned when the tracker is queried
+ * against the wrong network (NETWORK defaults to testnet) or during a Hiro
+ * indexer resync. Applying such a body clobbered a healthy mainnet nonce (~985)
+ * down to 1, causing guaranteed BadNonce on every subsequent send.
+ * @see https://github.com/aibtcdev/skills/issues/240
+ */
+const NONCE_REGRESSION_TOLERANCE = 5;
+
 /** Lock timeout: stale locks older than this are force-removed. */
 const LOCK_STALE_MS = 30_000;
 
@@ -260,6 +272,48 @@ function isStale(entry: AddressNonceState): boolean {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/** Highest nonce this address is known to have broadcast (0 if none logged). */
+function maxPendingNonce(entry: AddressNonceState): number {
+  let max = 0;
+  for (const p of entry.pending) {
+    if (p.nonce > max) max = p.nonce;
+  }
+  return max;
+}
+
+/**
+ * Local state is implausible when its `nextNonce` sits materially below a nonce
+ * this address has already broadcast — you can never legitimately be handed a
+ * nonce lower than one already in the mempool. This detects a poisoned entry
+ * (e.g. clobbered to 1) even while it is still within the STALE window, forcing
+ * a fresh chain sync instead of serving the bad value.
+ */
+function isLocallyImplausible(entry: AddressNonceState): boolean {
+  return entry.nextNonce < maxPendingNonce(entry) - NONCE_REGRESSION_TOLERANCE;
+}
+
+/**
+ * Whether a fresh Hiro nonce response can be trusted to overwrite existing
+ * local state. Rejects empty-account / wrong-network / degraded bodies:
+ * a `null` last-executed nonce or a large backwards jump against a known
+ * higher `nextNonce` both indicate the response does not describe this
+ * address on this network. With no prior state there is nothing to protect,
+ * so the response is accepted.
+ */
+export function isTrustworthyHiroSync(
+  hiro: Pick<NonceInfo, "possible_next_nonce" | "last_executed_tx_nonce">,
+  existing: AddressNonceState | undefined
+): boolean {
+  if (!existing) return true;
+  // An address with prior tracked activity never reports a null last-executed
+  // nonce on its real network — that is an empty-account (wrong-network) body.
+  if (hiro.last_executed_tx_nonce == null && existing.nextNonce > 1) return false;
+  if (hiro.possible_next_nonce < existing.nextNonce - NONCE_REGRESSION_TOLERANCE) {
+    return false;
+  }
+  return true;
+}
+
 function evictOldestAddresses(state: NonceStateFile): void {
   const entries = Object.entries(state.addresses);
   if (entries.length <= MAX_ADDRESSES) return;
@@ -282,20 +336,33 @@ export async function acquireNonce(address: string): Promise<AcquireResult> {
     let entry = state.addresses[address];
     let source: "local" | "hiro" = "local";
 
-    if (!entry || isStale(entry)) {
+    if (!entry || isStale(entry) || isLocallyImplausible(entry)) {
       const hiro = await fetchNonceInfo(address);
-      const now = new Date().toISOString();
-      entry = {
-        nextNonce: hiro.possible_next_nonce,
-        lastUpdated: now,
-        lastSynced: now,
-        lastExecutedNonce: hiro.last_executed_tx_nonce,
-        mempoolPending: hiro.detected_mempool_nonces?.length ?? 0,
-        pending: entry?.pending ?? [],
-      };
-      state.addresses[address] = entry;
-      evictOldestAddresses(state);
-      source = "hiro";
+      if (isTrustworthyHiroSync(hiro, entry)) {
+        const now = new Date().toISOString();
+        entry = {
+          nextNonce: hiro.possible_next_nonce,
+          lastUpdated: now,
+          lastSynced: now,
+          lastExecutedNonce: hiro.last_executed_tx_nonce,
+          mempoolPending: hiro.detected_mempool_nonces?.length ?? 0,
+          pending: entry?.pending ?? [],
+        };
+        state.addresses[address] = entry;
+        evictOldestAddresses(state);
+        source = "hiro";
+      } else if (!entry) {
+        // No local state to fall back on and the chain response is untrustworthy
+        // (empty-account / wrong-network body). Refuse rather than hand out a
+        // nonce we cannot trust.
+        throw new Error(
+          `Refusing to acquire nonce for ${address}: Hiro returned an untrustworthy ` +
+            `response (possible_next_nonce=${hiro.possible_next_nonce}, ` +
+            `last_executed_tx_nonce=${hiro.last_executed_tx_nonce}). Verify NETWORK is set correctly.`
+        );
+      }
+      // else: keep the existing (higher) local nonce — a degraded response must
+      // not lower it. Serve local; a real sync will happen once it re-passes.
     }
 
     const nonce = entry.nextNonce;
@@ -363,16 +430,30 @@ export async function releaseNonce(
 export async function syncNonce(address: string): Promise<SyncResult> {
   return withLock(async () => {
     const state = readStateFileSync();
+    const existing = state.addresses[address];
     const hiro = await fetchNonceInfo(address);
-    const now = new Date().toISOString();
 
+    // Never let an empty-account / wrong-network response clobber a known-good
+    // higher nonce. Preserve existing state and report it instead of persisting
+    // the untrustworthy body.
+    if (!isTrustworthyHiroSync(hiro, existing)) {
+      return {
+        nonce: existing!.nextNonce,
+        address,
+        mempoolPending: existing!.mempoolPending,
+        lastExecuted: existing!.lastExecutedNonce,
+        detectedMissing: [],
+      };
+    }
+
+    const now = new Date().toISOString();
     state.addresses[address] = {
       nextNonce: hiro.possible_next_nonce,
       lastUpdated: now,
       lastSynced: now,
       lastExecutedNonce: hiro.last_executed_tx_nonce,
       mempoolPending: hiro.detected_mempool_nonces?.length ?? 0,
-      pending: state.addresses[address]?.pending ?? [],
+      pending: existing?.pending ?? [],
     };
     writeStateFileSync(state);
 
@@ -485,6 +566,10 @@ export const _testing = {
   STALE_NONCE_MS,
   MAX_PENDING_LOG,
   MAX_ADDRESSES,
+  NONCE_REGRESSION_TOLERANCE,
+  maxPendingNonce,
+  isLocallyImplausible,
+  isTrustworthyHiroSync,
   get NONCE_STATE_FILE() {
     return NONCE_STATE_FILE;
   },
